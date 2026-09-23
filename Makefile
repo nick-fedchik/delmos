@@ -38,9 +38,9 @@ run: build ## Запустити сервер із локальною конфі
 test: ## Модульні тести з перевіркою гонок
 	go test -race ./...
 
-test-integration: ## Тести, що потребують PostgreSQL (DELMOS_TEST_DSN)
+test-integration: ## Тести, що потребують PostgreSQL (DELMOS_TEST_DSN, за потреби DELMOS_TEST_TEMPLATE)
 	@test -n "$(DELMOS_TEST_DSN)" || { echo "Задайте DELMOS_TEST_DSN (див. make db-test-setup)"; exit 1; }
-	go test -race -count=1 ./internal/migrate/...
+	go test -race -count=1 ./internal/migrate/... ./internal/auth/... ./internal/server/...
 
 fmt: ## Відформатувати код
 	gofmt -w cmd internal

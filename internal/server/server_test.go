@@ -14,6 +14,10 @@ func testLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
 }
 
+func testDeps(ready ReadinessCheck) Deps {
+	return Deps{Ready: ready, CookieSecure: true}
+}
+
 func do(t *testing.T, handler http.Handler, path string) *httptest.ResponseRecorder {
 	t.Helper()
 
@@ -24,7 +28,7 @@ func do(t *testing.T, handler http.Handler, path string) *httptest.ResponseRecor
 }
 
 func TestHealthzAlwaysOK(t *testing.T) {
-	handler := newRouter(testLogger(), func(context.Context) error { return errors.New("база недоступна") })
+	handler := newRouter(testLogger(), testDeps(func(context.Context) error { return errors.New("база недоступна") }))
 
 	if code := do(t, handler, "/healthz").Code; code != http.StatusOK {
 		t.Errorf("liveness має не залежати від СУБД, отримано %d", code)
@@ -32,12 +36,12 @@ func TestHealthzAlwaysOK(t *testing.T) {
 }
 
 func TestReadyzReflectsDependencies(t *testing.T) {
-	ready := newRouter(testLogger(), func(context.Context) error { return nil })
+	ready := newRouter(testLogger(), testDeps(func(context.Context) error { return nil }))
 	if code := do(t, ready, "/readyz").Code; code != http.StatusOK {
 		t.Errorf("очікувався 200, отримано %d", code)
 	}
 
-	broken := newRouter(testLogger(), func(context.Context) error { return errors.New("пінг PostgreSQL: timeout") })
+	broken := newRouter(testLogger(), testDeps(func(context.Context) error { return errors.New("пінг PostgreSQL: timeout") }))
 	recorder := do(t, broken, "/readyz")
 
 	if recorder.Code != http.StatusServiceUnavailable {
@@ -59,7 +63,7 @@ func TestPanicIsContained(t *testing.T) {
 }
 
 func TestRequestIDHeaderIsSet(t *testing.T) {
-	handler := newRouter(testLogger(), func(context.Context) error { return nil })
+	handler := newRouter(testLogger(), testDeps(func(context.Context) error { return nil }))
 
 	if do(t, handler, "/healthz").Header().Get("X-Request-Id") == "" {
 		t.Error("кожна відповідь має містити ідентифікатор запиту для трасування")

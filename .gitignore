@@ -37,3 +37,6 @@ bin/
 delmos.local.yaml
 *.dump
 *.sha256
+
+# Особисті sudoers-файли розробника (містять локальне ім'я користувача ОС) — не в git.
+scripts/dev/

@@ -1,21 +1,19 @@
 # DELMOS: локальне середовище розробки (Local Setup)
 
-Дата: 2026-09-23. Статус: цільова інструкція для майбутнього вихідного коду, не перевірена процедура запуску.
+Дата: 2026-09-23. Статус: перевірена процедура — усі команди нижче виконано й пройдено на робочому середовищі (Ubuntu, Go 1.26, PostgreSQL 18.6, pgvector 0.8.6).
 Ліцензія: Apache 2.0.
-Контекст: [вимоги до середовища розробки](../../requirements/SYSTEM_REQUIREMENTS.md#2-вимоги-до-середовища-розробки-development-environment).
+Контекст: [вимоги до середовища розробки](../../requirements/SYSTEM_REQUIREMENTS.md#2-вимоги-до-середовища-розробки-development-environment), [вимоги до СУБД](../../requirements/SYSTEM_REQUIREMENTS.md#3-вимоги-до-субд-postgresql-database-requirements).
 
 ---
 
-Зараз DELMOS містить документацію, але не містить `go.mod`, `web/`, `cmd/delmos`, `configs/delmos.dev.yaml` і Makefile. Команди нижче задають очікуваний шлях розробника **після** появи відповідних файлів; наразі їх не можна виконати в цьому каталозі.
-
 ## 1. Передумови
 
-* Ubuntu 24.04 LTS / 26.04 LTS (або сумісний дистрибутив Linux).
-* Go 1.22+ (рекомендовано 1.26).
-* Node.js LTS для інструментарію фронтенду (Vite 6.x, Vue 3.5+).
-* Локально встановлений PostgreSQL 16+ (рекомендовано 18.6) із розширеннями `pgvector` та `ltree`.
+* Linux (Ubuntu 24.04/26.04 LTS або сумісний дистрибутив).
+* Go 1.25+ (перевірено на 1.26).
+* PostgreSQL 16+ (перевірено на 18.6) із розширеннями `pgvector` (0.8+), `ltree`, `pgcrypto`, встановленими на рівні сервера (пакети ОС), — самі розширення ще потрібно **активувати** в конкретній базі (крок 3).
+* `make`, `golangci-lint` (опційно для `make lint`; без нього `make validate` пропускає цей крок з попередженням).
 
-## 2. Клонування та збірка backend
+## 2. Клонування та збірка
 
 ```bash
 git clone <URL-репозиторію> delmos
@@ -23,37 +21,72 @@ cd delmos
 go build ./...
 ```
 
-## 3. Підготовка бази даних для розробки
+## 3. Підготовка PostgreSQL
+
+### 3.1. Чому потрібен суперкористувач саме тут
+
+`pgvector` **не** позначений як `trusted` розширення (`vector.control` без `trusted = true`), тому `CREATE EXTENSION vector` виконує лише суперкористувач СУБД. Робітнича роль застосунку (`delmos`) і роль мігратора (`delmos_migrator`) навмисно **не** мають цього права (SYSTEM_REQUIREMENTS.md §3.3) — розширення активується один раз під час підготовки бази, а не при кожному запуску міграцій.
+
+### 3.2. Основна база застосунку (одноразово, від суперкористувача)
 
 ```bash
-sudo -u postgres createuser --no-superuser --no-createdb --no-createrole delmos_dev
-sudo -u postgres createdb --owner=delmos_dev delmos_dev
-sudo -u postgres psql -d delmos_dev -c "CREATE EXTENSION IF NOT EXISTS vector;"
-sudo -u postgres psql -d delmos_dev -c "CREATE EXTENSION IF NOT EXISTS ltree;"
+sudo -u postgres make db-setup
 ```
+
+Виконує [scripts/sql/bootstrap.sql](../../../scripts/sql/bootstrap.sql): створює ролі `delmos`/`delmos_migrator`, базу `delmos`, активує розширення. Параметри (`DB_NAME`, `DB_APP_ROLE`, `DB_MIG_ROLE`) можна перевизначити через змінні `make`.
+
+### 3.3. Тестовий шаблон для інтеграційних тестів
+
+Інтеграційні тести (`internal/testsupport`) створюють окрему тимчасову базу на кожен тест. Щоб не потребувати прав суперкористувача під час самих тестів, тимчасові бази клонуються з наперед підготовленого шаблону, де розширення вже активовані:
+
+```bash
+sudo -u postgres make db-test-setup DB_TEST_ROLE="$(whoami)"
+```
+
+Це створює:
+* роль PostgreSQL з іменем **вашого поточного ОС-користувача** та правом `CREATEDB` — завдяки цьому локальне з'єднання по UNIX-сокету проходить стандартну `peer`-автентифікацію (`local all all peer` у `pg_hba.conf`) без пароля і без додаткових налаштувань;
+* базу-шаблон `delmos_test_template` з активованими `vector`/`ltree`/`pgcrypto`, позначену `IS_TEMPLATE`.
+
+> Якщо потрібна саме спільна (не персональна) назва ролі — наприклад, `delmos_test` для CI-подібного відтворення локально, — додайте маппінг ідентичності в `pg_ident.conf` (`<map_name> <ваш_ОС_користувач> delmos_test`) і відповідний рядок `local all delmos_test peer map=<map_name>` у `pg_hba.conf` **перед** загальним рядком `local all all peer`, потім `sudo systemctl reload postgresql`. Це системна зміна — вносить лише DBA/оператор хоста.
+
+### 3.4. Запуск тестів
+
+```bash
+export DELMOS_TEST_DSN="postgres://$(whoami)@/postgres?host=/var/run/postgresql"
+export DELMOS_TEST_TEMPLATE=delmos_test_template
+make test-integration   # тести, що потребують PostgreSQL
+go test -race ./...     # повний набір: і юніт-, і (за наявності DSN) інтеграційні тести
+```
+
+Без `DELMOS_TEST_DSN` тести, що потребують БД, автоматично пропускаються (`t.Skip`), а не падають — це не помилка.
 
 ## 4. Запуск локального сервера
 
 ```bash
-go run ./cmd/delmos --config ./configs/delmos.dev.yaml
+make build
+make migrate                                 # застосувати міграції схеми
+DELMOS_BOOTSTRAP_PASSWORD='<локальний-пароль>' ./bin/delmos -config ./configs/delmos.yaml -bootstrap-admin admin
+./bin/delmos -config ./configs/delmos.yaml    # або: make run
 ```
 
-## 5. Frontend (Vue 3 / Vite)
+Для локальної розробки без TLS-термінації додайте у `configs/delmos.yaml`:
 
-```bash
-cd web
-npm install
-npm run dev
+```yaml
+server:
+  cookie_secure: false   # лише для http://localhost; за реверс-проксі з TLS лишати true (типове значення)
 ```
 
-## 6. Перевірка перед комітом
+або встановіть `DELMOS_COOKIE_SECURE=false` в оточенні процесу.
+
+## 5. Перевірка перед комітом
 
 ```bash
 make validate
 ```
 
-Після реалізації команда повинна виконувати лінтери, перевірку типів, юніт-тести backend і frontend та перевірку цілісності документації (посилання, заголовки H1, закриті блоки коду).
+Виконує `gofmt`, `go vet`, `golangci-lint` (якщо встановлено), `go test -race ./...`, перевірку відносних Markdown-посилань і збірку бінарника без CGO (`-trimpath`, тому в артефакті немає локальних шляхів чи імені хоста). Інтеграційні тести з реальною БД в `make validate` не входять — запускайте їх окремо (крок 3.4) перед відкриттям Merge Request, якщо змінили `internal/migrate`, `internal/auth` чи `internal/server`.
 
-## 7. Дивіться також
+## 6. Дивіться також
 
 * [CONTRIBUTING_WORKFLOW.md](CONTRIBUTING_WORKFLOW.md) — стиль коду, конвенції комітів, чек-лист Merge Request.
+* [scripts/sql/bootstrap.sql](../../../scripts/sql/bootstrap.sql), [scripts/sql/test-template.sql](../../../scripts/sql/test-template.sql) — SQL, що виконує `db-setup`/`db-test-setup`.

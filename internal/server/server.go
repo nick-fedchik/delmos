@@ -12,7 +12,9 @@ import (
 	"net/http"
 	"time"
 
+	"delmos/internal/auth"
 	"delmos/internal/config"
+	"delmos/internal/ratelimit"
 	"delmos/internal/version"
 )
 
@@ -22,14 +24,22 @@ type ReadinessCheck func(ctx context.Context) error
 
 const readinessTimeout = 5 * time.Second
 
+// Deps збирає залежності HTTP-шару, що виходять за межі самого net/http.
+type Deps struct {
+	Ready        ReadinessCheck
+	Auth         *auth.Service
+	LoginLimiter *ratelimit.Limiter
+	CookieSecure bool
+}
+
 type Server struct {
 	http            *http.Server
 	logger          *slog.Logger
 	shutdownTimeout time.Duration
 }
 
-func New(cfg config.Server, logger *slog.Logger, ready ReadinessCheck) *Server {
-	handler := newRouter(logger, ready)
+func New(cfg config.Server, logger *slog.Logger, deps Deps) *Server {
+	handler := newRouter(logger, deps)
 
 	return &Server{
 		http: &http.Server{
@@ -75,12 +85,18 @@ func (s *Server) Run(ctx context.Context) error {
 	return nil
 }
 
-func newRouter(logger *slog.Logger, ready ReadinessCheck) http.Handler {
+func newRouter(logger *slog.Logger, deps Deps) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", handleHealth)
-	mux.HandleFunc("GET /readyz", handleReady(logger, ready))
+	mux.HandleFunc("GET /readyz", handleReady(logger, deps.Ready))
 
-	return withRequestLogging(logger, withRecovery(logger, mux))
+	mux.HandleFunc("POST /api/v1/auth/login", handleLogin(logger, deps.Auth, deps.LoginLimiter, deps.CookieSecure))
+	mux.HandleFunc("POST /api/v1/auth/logout",
+		requireAuth(requireCSRF(logger, handleLogout(deps.Auth, deps.CookieSecure))))
+	mux.HandleFunc("GET /api/v1/auth/session", requireAuth(handleCurrentSession()))
+
+	handler := withSession(deps.Auth, deps.CookieSecure, mux)
+	return withRequestLogging(logger, withRecovery(logger, handler))
 }
 
 func handleHealth(w http.ResponseWriter, _ *http.Request) {

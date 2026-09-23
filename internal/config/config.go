@@ -34,6 +34,9 @@ type Server struct {
 	WriteTimeout    Duration `yaml:"write_timeout"`
 	IdleTimeout     Duration `yaml:"idle_timeout"`
 	ShutdownTimeout Duration `yaml:"shutdown_timeout"`
+	// CookieSecure ввімкає прапорець Secure і префікс __Host- у сесійних cookie.
+	// Вимкнений лише для локальної розробки без TLS (ARCHITECTURE.md: Secure під HTTPS).
+	CookieSecure bool `yaml:"cookie_secure"`
 }
 
 type Database struct {
@@ -62,6 +65,7 @@ func defaults() Config {
 			WriteTimeout:    Duration(30 * time.Second),
 			IdleTimeout:     Duration(60 * time.Second),
 			ShutdownTimeout: Duration(15 * time.Second),
+			CookieSecure:    true,
 		},
 		Database: Database{
 			Host:           "/var/run/postgresql",
@@ -135,6 +139,14 @@ func (c *Config) applyEnv() error {
 			return fmt.Errorf("DELMOS_DB_PORT: %w", err)
 		}
 		c.Database.Port = port
+	}
+
+	if value, ok := os.LookupEnv("DELMOS_COOKIE_SECURE"); ok {
+		secure, err := strconv.ParseBool(value)
+		if err != nil {
+			return fmt.Errorf("DELMOS_COOKIE_SECURE: %w", err)
+		}
+		c.Server.CookieSecure = secure
 	}
 
 	if c.Database.migratorPassword == "" {

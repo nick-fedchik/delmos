@@ -10,10 +10,15 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
+	"golang.org/x/time/rate"
+
+	"delmos/internal/auth"
 	"delmos/internal/config"
 	"delmos/internal/logging"
 	"delmos/internal/migrate"
+	"delmos/internal/ratelimit"
 	"delmos/internal/server"
 	"delmos/internal/storage/postgres"
 	"delmos/internal/version"
@@ -30,6 +35,8 @@ func run() error {
 	configPath := flag.String("config", config.DefaultPath, "шлях до файлу конфігурації delmos.yaml")
 	showVersion := flag.Bool("version", false, "вивести версію та завершити роботу")
 	migrateOnly := flag.Bool("migrate-only", false, "застосувати міграції схеми і завершити роботу")
+	bootstrapAdmin := flag.String("bootstrap-admin", "",
+		"створити System Administrator з цим логіном і завершити роботу (пароль з DELMOS_BOOTSTRAP_PASSWORD)")
 	flag.Parse()
 
 	if *showVersion {
@@ -62,6 +69,12 @@ func run() error {
 	}
 	defer pool.Close()
 
+	authStore := auth.NewStore(pool)
+
+	if *bootstrapAdmin != "" {
+		return runBootstrapAdmin(ctx, authStore, *bootstrapAdmin)
+	}
+
 	ready := func(ctx context.Context) error {
 		if err := pool.Ping(ctx); err != nil {
 			return fmt.Errorf("пінг PostgreSQL: %w", err)
@@ -69,7 +82,36 @@ func run() error {
 		return migrate.Verify(ctx, pool)
 	}
 
-	return server.New(cfg.Server, logger, ready).Run(ctx)
+	deps := server.Deps{
+		Ready:        ready,
+		Auth:         auth.NewService(authStore),
+		LoginLimiter: ratelimit.New(rate.Every(3*time.Second), 5), // 5 спроб одразу, далі 1 на 3 секунди на IP
+		CookieSecure: cfg.Server.CookieSecure,
+	}
+
+	return server.New(cfg.Server, logger, deps).Run(ctx)
+}
+
+// runBootstrapAdmin створює першого System Administrator; пароль передається лише через
+// змінну середовища, щоб не потрапити в аргументи процесу чи історію оболонки.
+func runBootstrapAdmin(ctx context.Context, store *auth.Store, login string) error {
+	password := os.Getenv("DELMOS_BOOTSTRAP_PASSWORD")
+	if password == "" {
+		return fmt.Errorf("задайте пароль через змінну середовища DELMOS_BOOTSTRAP_PASSWORD")
+	}
+
+	hash, err := auth.HashPassword(password)
+	if err != nil {
+		return err
+	}
+
+	userID, err := store.BootstrapAdministrator(ctx, login, login, hash)
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("System Administrator створено: %s (%s)\n", login, userID)
+	return nil
 }
 
 // applyMigrations виконується окремим пулом під роллю мігратора, який закривається одразу після DDL.
