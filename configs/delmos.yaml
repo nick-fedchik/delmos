@@ -1,0 +1,27 @@
+# Приклад конфігурації DELMOS.
+# Штатне розташування: /usr/local/etc/delmos/delmos.yaml (0640 root:delmos).
+#
+# Паролі БД задаються ВИКЛЮЧНО змінними середовища (наприклад, у
+# /usr/local/etc/delmos/delmos.env з правами 0600):
+#   DELMOS_DB_PASSWORD, DELMOS_DB_MIGRATOR_PASSWORD
+# Наявність ключа password у цьому файлі свідомо призводить до помилки старту.
+
+server:
+  address: "127.0.0.1:10020"
+  read_timeout: 10s
+  write_timeout: 30s
+  idle_timeout: 60s
+  shutdown_timeout: 15s
+
+database:
+  host: /var/run/postgresql
+  port: 5432
+  name: delmos
+  user: delmos
+  migrator_user: delmos_migrator
+  ssl_mode: prefer
+  max_connections: 10
+
+logging:
+  level: info
+  format: json

@@ -1,0 +1,26 @@
+[Unit]
+Description=DELMOS (Discovery, Engineering & Lifecycle Management Operating System)
+Documentation=https://github.com/nick-fedchik/delmos
+After=network.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=simple
+User=delmos
+Group=delmos
+ExecStart=/usr/local/bin/delmos -config /usr/local/etc/delmos/delmos.yaml
+WorkingDirectory=/var/lib/delmos
+EnvironmentFile=-/usr/local/etc/delmos/delmos.env
+Restart=always
+RestartSec=5s
+
+LimitNOFILE=65536
+ProtectSystem=full
+ProtectHome=true
+NoNewPrivileges=true
+PrivateTmp=true
+
+TimeoutStopSec=15s
+
+[Install]
+WantedBy=multi-user.target
