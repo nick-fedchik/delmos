@@ -42,6 +42,7 @@
 ```text
 ├── cmd/delmos/                # Точка входу сервера (єдиний бінарник)
 ├── internal/                  # Внутрішні пакети: config, logging, migrate, server, storage
+├── web/                       # Мінімальний Web GUI (Vue 3 + Vite + TypeScript, v0.6.0)
 ├── configs/delmos.yaml        # Приклад конфігурації (без секретів)
 ├── deploy/delmos.service      # Юніт systemd
 ├── scripts/                   # Перевірка посилань документації та SQL-скрипти DBA

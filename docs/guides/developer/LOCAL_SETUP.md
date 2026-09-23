@@ -78,15 +78,25 @@ server:
 
 або встановіть `DELMOS_COOKIE_SECURE=false` в оточенні процесу.
 
-## 5. Перевірка перед комітом
+## 5. Фронтенд (Vue 3 / Vite)
+
+```bash
+cd web
+npm install
+npm run dev     # http://localhost:5173, /api проксіюється на 127.0.0.1:10020 (vite.config.ts)
+```
+
+Мінімальний UI (`v0.6.0`) без дизайн-системи Pajamas — вхід, список/створення проєктів, перегляд плану, CRUD базового Work Product, прив'язка Git-сховища та експорт. Повна дизайн-система та вбудовування активів у Go-бінарник — наступні ітерації.
+
+## 6. Перевірка перед комітом
 
 ```bash
 make validate
 ```
 
-Виконує `gofmt`, `go vet`, `golangci-lint` (якщо встановлено), `go test -race ./...`, перевірку відносних Markdown-посилань і збірку бінарника без CGO (`-trimpath`, тому в артефакті немає локальних шляхів чи імені хоста). Інтеграційні тести з реальною БД в `make validate` не входять — запускайте їх окремо (крок 3.4) перед відкриттям Merge Request, якщо змінили `internal/migrate`, `internal/auth` чи `internal/server`.
+Виконує `gofmt`, `go vet`, `golangci-lint` (якщо встановлено), `go test -race` (лише `cmd`/`internal`, без `web/node_modules`), перевірку відносних Markdown-посилань і збірку Go-бінарника без CGO (`-trimpath`, тому в артефакті немає локальних шляхів чи імені хоста). Для `web/` також виконує ESLint, `vue-tsc`, `vitest` та продакшн-збірку (`web/dist`). Інтеграційні тести з реальною БД в `make validate` не входять — запускайте їх окремо (крок 3.4) перед відкриттям Merge Request, якщо змінили `internal/migrate`, `internal/auth` чи `internal/server`.
 
-## 6. Дивіться також
+## 7. Дивіться також
 
 * [CONTRIBUTING_WORKFLOW.md](CONTRIBUTING_WORKFLOW.md) — стиль коду, конвенції комітів, чек-лист Merge Request.
 * [scripts/sql/bootstrap.sql](../../../scripts/sql/bootstrap.sql), [scripts/sql/test-template.sql](../../../scripts/sql/test-template.sql) — SQL, що виконує `db-setup`/`db-test-setup`.

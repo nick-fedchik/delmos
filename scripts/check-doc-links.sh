@@ -28,7 +28,7 @@ while IFS= read -r file; do
         fi
         checked=$((checked + 1))
     done < <(grep -oE '\]\([^)]+\)' "$file" | sed -E 's/^\]\(//; s/\)$//')
-done < <(find . -name '*.md' -not -path './node_modules/*' -not -path './.git/*')
+done < <(find . -name '*.md' -not -path '*/node_modules/*' -not -path '*/.git/*' -not -path '*/dist/*')
 
 printf 'Перевірено відносних посилань: %d\n' "$checked"
 

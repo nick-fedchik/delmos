@@ -23,7 +23,7 @@ DB_MIG_ROLE   ?= delmos_migrator
 DB_TEST_ROLE  ?= delmos_test
 
 .DEFAULT_GOAL := help
-.PHONY: help build run test test-integration fmt fmt-check vet lint docs-links validate migrate db-setup db-test-setup install clean
+.PHONY: help build run test test-integration fmt fmt-check vet lint docs-links validate migrate db-setup db-test-setup install clean web-install web-lint web-typecheck web-test web-build
 
 help: ## Показати доступні цілі
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
@@ -36,7 +36,7 @@ run: build ## Запустити сервер із локальною конфі
 	./$(BUILD_DIR)/$(BINARY) -config ./configs/delmos.yaml
 
 test: ## Модульні тести з перевіркою гонок
-	go test -race ./...
+	go test -race ./cmd/... ./internal/...
 
 test-integration: ## Тести, що потребують PostgreSQL (DELMOS_TEST_DSN, за потреби DELMOS_TEST_TEMPLATE)
 	@test -n "$(DELMOS_TEST_DSN)" || { echo "Задайте DELMOS_TEST_DSN (див. make db-test-setup)"; exit 1; }
@@ -50,16 +50,31 @@ fmt-check: ## Перевірити форматування без запису
 	if [ -n "$$unformatted" ]; then echo "Не відформатовано:"; echo "$$unformatted"; exit 1; fi
 
 vet: ## Статичний аналіз стандартним go vet
-	go vet ./...
+	go vet ./cmd/... ./internal/...
 
 lint: ## golangci-lint (якщо встановлено)
-	@if command -v golangci-lint >/dev/null 2>&1; then golangci-lint run; \
+	@if command -v golangci-lint >/dev/null 2>&1; then golangci-lint run ./cmd/... ./internal/...; \
 	else echo "golangci-lint не встановлено — пропущено (go vet виконується окремо)"; fi
 
 docs-links: ## Перевірити відносні посилання в Markdown-документації
 	./scripts/check-doc-links.sh
 
-validate: fmt-check vet lint test docs-links build ## Повна перевірка якості перед Merge Request
+web-install: ## Встановити npm-залежності фронтенду (один раз, до node_modules)
+	@[ -d web/node_modules ] || (cd web && npm install)
+
+web-lint: web-install ## ESLint фронтенду
+	cd web && npm run lint
+
+web-typecheck: web-install ## Перевірка типів Vue/TypeScript (vue-tsc)
+	cd web && npm run typecheck
+
+web-test: web-install ## Юніт-тести фронтенду (vitest)
+	cd web && npm run test:unit
+
+web-build: web-install ## Скласти фронтенд у web/dist
+	cd web && npm run build
+
+validate: fmt-check vet lint test docs-links web-lint web-typecheck web-test web-build build ## Повна перевірка якості перед Merge Request
 	@echo "make validate: усі перевірки пройдено"
 
 migrate: build ## Застосувати міграції схеми та завершити роботу
