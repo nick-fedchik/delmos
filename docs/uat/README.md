@@ -20,10 +20,10 @@
 
 | ID | Назва | Роль | Перевіряє | Статус |
 | --- | --- | --- | --- | --- |
-| [UAT-001](UAT-001-project-creation-and-generic-plan.md) | Створення проєкту з автоматичним Generic Project Plan | Project Manager / System Administrator | `SHR-01`, `SHR-09` (PM-001, PM-002, ADM-006) | Draft |
-| [UAT-002](UAT-002-composite-specification-authoring.md) | Авторинг композитної специфікації та валідація посилань | Requirements Engineer | `SHR-11` (SPEC-01 сценарії) | Draft |
-| [UAT-003](UAT-003-module-activation-and-plan-apply.md) | Активація модуля комплаєнсу та застосування плану | Project Manager | `SHR-02`, `SHR-03` (PM-005, PM-006, PM-013, PM-014) | Draft |
-| [UAT-004](UAT-004-core-roles-review-approval.md) | Базові ролі й незалежне погодження без галузевих модулів | Admin / PM / Engineer / Reviewer / Approver / Auditor / Viewer | `SHR-14`, `SWR-42..48`; частково `SHR-09`, `SWR-28` | Draft |
+| [UAT-001](UAT-001-project-creation-and-generic-plan.md) | Створення проєкту з автоматичним Generic Project Plan | Project Manager / System Administrator | `SHR-01`, `SHR-09` (PM-001, PM-002, ADM-006) | Blocked (v1.0.0); кореневий інваріант підтверджено автотестами |
+| [UAT-002](UAT-002-composite-specification-authoring.md) | Авторинг композитної специфікації та валідація посилань | Requirements Engineer | `SHR-11` (SPEC-01 сценарії) | Blocked (потребує `v1.x`) |
+| [UAT-003](UAT-003-module-activation-and-plan-apply.md) | Активація модуля комплаєнсу та застосування плану | Project Manager | `SHR-02`, `SHR-03` (PM-005, PM-006, PM-013, PM-014) | Blocked (потребує `v1.x`) |
+| [UAT-004](UAT-004-core-roles-review-approval.md) | Базові ролі й незалежне погодження без галузевих модулів | Admin / PM / Engineer / Reviewer / Approver / Auditor / Viewer | `SHR-14`, `SWR-42..48`; частково `SHR-09`, `SWR-28` | Blocked (Review/Approval потребує `v1.x`); RBAC/ізоляція проєктів підтверджено автотестами |
 
 ## 3. Покриття стейкхолдерських вимог
 

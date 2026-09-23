@@ -1,10 +1,14 @@
 # UAT-004: Спільний сценарій базових ролей і незалежного погодження
 
-Дата: 2026-09-23. Статус: Draft (не виконано; базова політика визначена у SWR-42..48).
+Дата: 2026-09-23. Статус: **Blocked (v1.0.0)** — `wp.submit`/`wp.review`/`wp.approve`, `plan.apply` та кворум SoD не реалізовані в `v1.0.0` (ціль `v1.x`, див. [ROADMAP.md](../architecture/ROADMAP.md), [ADR-009](../architecture/decisions/ADR-009-core-review-and-approval-policy.md)). Базова політика визначена у SWR-42..48.
 Ліцензія: Apache 2.0.
 Контекст: [каталог базових ролей](../use-cases/README.md), [модель доступу](../architecture/ACCESS_CONTROL.md), [Work Products](../architecture/WORK_PRODUCTS.md), [SHR-09](../requirements/stakeholder/SHR-09-work-item-and-work-product.md), [SHR-14](../requirements/stakeholder/SHR-14-core-access-and-assurance.md), [SWR-42..48](../requirements/software/SWR-10-core-access-assurance.md), [CORE-CONTRACT-001](../specifications/CORE-CONTRACT-001-ROLE-WORKFLOW.md).
 
 ---
+
+## Що вже підтверджено в v1.0.0
+
+Scoped RBAC без погодження: ізоляція проєктів між користувачами (`internal/project/store_test.go: TestListForActorExcludesForeignProjects`), відкликання RoleBinding діє на наступний запит навіть при активній сесії (`internal/auth/service_test.go: TestRevokedRoleBindingLosesPermissionOnNextCheck`), чужий проєкт повертає 404 без розкриття існування об'єкта (`internal/server/project_handlers_test.go: TestGetProjectHiddenFromNonMember`). Ревізійний/апрувальний workflow (кроки 1–6 нижче) залишається Blocked до `v1.x`.
 
 ## Мета і передумови
 

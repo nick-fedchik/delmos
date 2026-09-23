@@ -1,12 +1,22 @@
 # UAT-001: Створення проєкту з автоматичним Generic Project Plan
 
-- **Статус:** Draft
+- **Статус:** Blocked (v1.0.0) — кореневий інваріант сценарію підтверджено автоматизованими тестами (див. нижче); повний сценарій із веб-інтерфейсу чекає `Programme`, вибору `RepositoryProvider` при створенні та розділу RACI, які не входять до `v1.0.0`.
 - **Перевіряє вимоги:** `SHR-01` (Generic Project Plan), `SHR-09` (Work Item and Work Product)
 - **Роль виконавця:** Project Manager (за сприяння System Administrator для попереднього кроку)
-- **Версія платформи:** v0.1.0 (PoC)
-- **Дата останнього виконання:** *Ще не виконано.*
+- **Версія платформи:** v1.0.0
+- **Дата останнього виконання:** *Сценарій через UI ще не виконано.*
 
 ---
+
+## Автоматизоване підтвердження для v1.0.0
+
+Кореневий інваріант — проєкт і `PLAN-001` створюються атомарно, без ручного втручання — підтверджено:
+
+* `internal/project/store_test.go` (`TestCreateWithPlanIsAtomicAndImmutable`, `TestCreatorReceivesProjectOwnerBinding`) — транзакційне створення, автоматичне надання `project.owner`.
+* `internal/server/project_handlers_test.go` та `internal/server/contract_test.go` (`TestContractFullLifecycle`) — наскрізний REST-сценарій вхід → створення проєкту з `PLAN-001` звірений проти [openapi.v1.yaml](../api/openapi.v1.yaml).
+* Підтверджено вживу в браузері (Playwright) під час реалізації `v0.6.0`: вхід → створення проєкту → перегляд `PLAN-001`.
+
+Повний сценарій нижче (з `Programme`, вибором `RepositoryProvider` на кроці створення та розділом RACI) лишається цільовим для майбутньої версії.
 
 ## Передумови
 

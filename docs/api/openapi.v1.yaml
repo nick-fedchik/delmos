@@ -1,0 +1,520 @@
+openapi: 3.1.0
+info:
+  title: DELMOS v1.0.0 API (implemented subset)
+  version: 1.0.0
+  description: >-
+    Frozen, implemented REST contract shipped in v1.0.0: local authentication,
+    Project CRUD with the mandatory Generic Project Plan (PLAN-001), CRUD of
+    the six core Work Product types with immutable revisions, and a plain Git
+    RepositoryProvider. Review/Approval workflow (wp.submit/review/approve,
+    plan.apply), composite specifications, vector/graph search, automation and
+    project economics are OUT OF SCOPE for v1.0.0 — see
+    docs/api/openapi.core.v1.yaml for that target contract and
+    docs/architecture/ROADMAP.md for the version plan.
+servers:
+  - url: /api/v1
+security:
+  - sessionCookie: []
+paths:
+  /auth/login:
+    post:
+      operationId: login
+      summary: Authenticate with login/password and start a session
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [login, password]
+              properties:
+                login: { type: string }
+                password: { type: string }
+      responses:
+        '200':
+          description: Session established; session cookie set, CSRF token returned in body
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LoginResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /auth/logout:
+    post:
+      operationId: logout
+      summary: Revoke the current session
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+      responses:
+        '204': { description: Session revoked }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /auth/session:
+    get:
+      operationId: currentSession
+      summary: Return the authenticated actor and active permissions
+      responses:
+        '200':
+          description: Current user
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserView' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /role-bindings:
+    post:
+      operationId: grantSystemRole
+      summary: Grant a System-scope RoleBinding
+      x-required-permission: access.grant
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [user_id, role_key, reason]
+              properties:
+                user_id: { type: string, format: uuid }
+                role_key: { type: string }
+                reason: { type: string }
+      responses:
+        '201':
+          description: RoleBinding created
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id]
+                properties:
+                  id: { type: string, format: uuid }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/Invariant' }
+  /role-bindings/{binding_id}:
+    delete:
+      operationId: revokeRoleBinding
+      summary: Revoke a RoleBinding for subsequent requests
+      x-required-permission: access.revoke
+      parameters:
+        - $ref: '#/components/parameters/BindingId'
+        - $ref: '#/components/parameters/CsrfToken'
+      responses:
+        '204': { description: Binding revoked (or already revoked — idempotent) }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /projects:
+    post:
+      operationId: createProject
+      summary: Create a Project and its mandatory PLAN-001 atomically
+      x-required-permission: scopes.manage
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateProject' }
+      responses:
+        '201':
+          description: Project and PLAN-001 (revision 1) created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProjectView' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/Invariant' }
+    get:
+      operationId: listProjects
+      summary: List projects where the actor holds an active Project-scope RoleBinding
+      responses:
+        '200':
+          description: Visible projects only (SWR-42 §3)
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/ProjectSummary' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /projects/{project_id}:
+    get:
+      operationId: getProject
+      summary: Read a project and its current PLAN-001 revision
+      x-required-permission: project.read
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      responses:
+        '200':
+          description: Project detail
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProjectView' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/Hidden' }
+  /projects/{project_id}/work-products:
+    post:
+      operationId: createWorkProduct
+      summary: Create a draft Work Product with its first immutable revision
+      x-required-permission: wp.create
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateWorkProduct' }
+      responses:
+        '201':
+          description: Draft created with server-generated payload_hash/content_hash
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/WorkProductView' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/Hidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/Invariant' }
+    get:
+      operationId: listWorkProducts
+      summary: List Work Products of a project
+      x-required-permission: project.read
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      responses:
+        '200':
+          description: Work Product summaries
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/WorkProductSummary' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/Hidden' }
+  /projects/{project_id}/work-products/{work_product_id}:
+    get:
+      operationId: getWorkProduct
+      summary: Read a Work Product and its latest revision, scoped to its project
+      x-required-permission: wp.read
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - $ref: '#/components/parameters/WorkProductId'
+      responses:
+        '200':
+          description: Work Product detail
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/WorkProductView' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/Hidden' }
+  /projects/{project_id}/work-products/{work_product_id}/revisions:
+    post:
+      operationId: reviseWorkProduct
+      summary: Write a new immutable draft revision with optimistic concurrency
+      x-required-permission: wp.edit
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - $ref: '#/components/parameters/WorkProductId'
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReviseWorkProduct' }
+      responses:
+        '201':
+          description: New revision created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/WorkProductRevisionView' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/Hidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/Invariant' }
+  /projects/{project_id}/work-products/{work_product_id}/retire:
+    post:
+      operationId: retireWorkProduct
+      summary: Move a draft Work Product to obsolete (idempotent)
+      x-required-permission: wp.retire
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - $ref: '#/components/parameters/WorkProductId'
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [expected_row_version]
+              properties:
+                expected_row_version: { type: integer }
+      responses:
+        '204': { description: Retired (or already obsolete — idempotent no-op) }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/Hidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /projects/{project_id}/repository:
+    post:
+      operationId: bindRepository
+      summary: Bind the project to a plain Git repository (local bare or HTTPS)
+      x-required-permission: repository.manage
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [remote_url]
+              properties:
+                remote_url: { type: string }
+                default_branch: { type: string }
+      responses:
+        '201':
+          description: Binding created or updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RepositoryBindingView' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/Hidden' }
+        '422': { $ref: '#/components/responses/Invariant' }
+    get:
+      operationId: getRepository
+      summary: Read the project's repository binding and last probe status
+      x-required-permission: project.read
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      responses:
+        '200':
+          description: Repository binding
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RepositoryBindingView' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/Hidden' }
+  /projects/{project_id}/work-products/{work_product_id}/export:
+    post:
+      operationId: exportWorkProduct
+      summary: Commit the Work Product's latest revision body to the bound repository
+      x-required-permission: repository.manage
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - $ref: '#/components/parameters/WorkProductId'
+        - $ref: '#/components/parameters/CsrfToken'
+      responses:
+        '200':
+          description: Exported
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [commit_sha]
+                properties:
+                  commit_sha: { type: string }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/Hidden' }
+        '422': { $ref: '#/components/responses/Invariant' }
+
+components:
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: delmos_session
+
+  parameters:
+    ProjectId:
+      name: project_id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    WorkProductId:
+      name: work_product_id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    BindingId:
+      name: binding_id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    CsrfToken:
+      name: X-CSRF-Token
+      in: header
+      required: true
+      schema: { type: string }
+
+  responses:
+    BadRequest:
+      description: Malformed request body
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorBody' }
+    Unauthorized:
+      description: No valid session
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorBody' }
+    Forbidden:
+      description: Authenticated but not permitted for this visible action
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorBody' }
+    Hidden:
+      description: Unknown or invisible object (identical for both cases, SWR-44 §2)
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorBody' }
+    Conflict:
+      description: Stale row_version or duplicate business key
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorBody' }
+    Invariant:
+      description: Authorized request that violates a business invariant
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorBody' }
+    TooManyRequests:
+      description: Rate limit exceeded
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorBody' }
+
+  schemas:
+    ErrorBody:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code: { type: string }
+            message: { type: string }
+
+    UserView:
+      type: object
+      required: [id, login, permissions]
+      properties:
+        id: { type: string, format: uuid }
+        login: { type: string }
+        display_name: { type: string }
+        permissions:
+          type: array
+          items: { type: string }
+
+    LoginResponse:
+      type: object
+      required: [csrf_token, expires_at, user]
+      properties:
+        csrf_token: { type: string }
+        expires_at: { type: string, format: date-time }
+        user: { $ref: '#/components/schemas/UserView' }
+
+    CreateProject:
+      type: object
+      required: [code, name]
+      properties:
+        code: { type: string }
+        name: { type: string }
+        description: { type: string }
+
+    PlanView:
+      type: object
+      required: [code, type, title, status, revision_number, body, metadata, payload_hash]
+      properties:
+        code: { type: string }
+        type: { type: string, enum: [plan] }
+        title: { type: string }
+        status: { type: string, enum: [draft, in_review, approved, obsolete] }
+        revision_number: { type: integer }
+        body: { type: string }
+        metadata: { type: object }
+        payload_hash: { type: string }
+
+    ProjectView:
+      type: object
+      required: [id, code, name, description, status, plan]
+      properties:
+        id: { type: string, format: uuid }
+        code: { type: string }
+        name: { type: string }
+        description: { type: string }
+        status: { type: string, enum: [active, archived] }
+        plan: { $ref: '#/components/schemas/PlanView' }
+
+    ProjectSummary:
+      type: object
+      required: [id, code, name, status]
+      properties:
+        id: { type: string, format: uuid }
+        code: { type: string }
+        name: { type: string }
+        status: { type: string, enum: [active, archived] }
+
+    CreateWorkProduct:
+      type: object
+      required: [code, type, title]
+      properties:
+        code: { type: string }
+        type:
+          type: string
+          enum: [requirement, architecture, test_spec, report, record]
+        title: { type: string }
+        body: { type: string }
+        metadata: { type: object }
+
+    ReviseWorkProduct:
+      type: object
+      required: [expected_row_version, body]
+      properties:
+        expected_row_version: { type: integer }
+        body: { type: string }
+        metadata: { type: object }
+
+    WorkProductRevisionView:
+      type: object
+      required: [revision_number, body, metadata, payload_hash, content_hash]
+      properties:
+        revision_number: { type: integer }
+        body: { type: string }
+        metadata: { type: object }
+        payload_hash: { type: string }
+        content_hash: { type: string }
+
+    WorkProductView:
+      type: object
+      required: [id, code, type, title, status, row_version, latest_revision]
+      properties:
+        id: { type: string, format: uuid }
+        code: { type: string }
+        type: { type: string }
+        title: { type: string }
+        status: { type: string, enum: [draft, in_review, approved, obsolete] }
+        row_version: { type: integer }
+        latest_revision: { $ref: '#/components/schemas/WorkProductRevisionView' }
+
+    WorkProductSummary:
+      type: object
+      required: [id, code, type, title, status]
+      properties:
+        id: { type: string, format: uuid }
+        code: { type: string }
+        type: { type: string }
+        title: { type: string }
+        status: { type: string, enum: [draft, in_review, approved, obsolete] }
+
+    RepositoryBindingView:
+      type: object
+      required: [remote_url, default_branch, status]
+      properties:
+        remote_url: { type: string }
+        default_branch: { type: string }
+        status: { type: string, enum: [active, error] }
+        last_error: { type: string }
