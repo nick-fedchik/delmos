@@ -60,7 +60,7 @@ docs-links: ## Перевірити відносні посилання в Markd
 	./scripts/check-doc-links.sh
 
 web-install: ## Встановити npm-залежності фронтенду (один раз, до node_modules)
-	@[ -d web/node_modules ] || (cd web && npm install)
+	@[ -d web/node_modules ] || (cd web && npm ci)
 
 web-lint: web-install ## ESLint фронтенду
 	cd web && npm run lint
