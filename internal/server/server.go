@@ -106,6 +106,17 @@ func newRouter(logger *slog.Logger, deps Deps) http.Handler {
 	mux.HandleFunc("GET /api/v1/projects", requireAuth(handleListProjects(deps.Projects)))
 	mux.HandleFunc("GET /api/v1/projects/{project_id}", requireAuth(handleGetProject(deps.Auth, deps.Projects)))
 
+	mux.HandleFunc("POST /api/v1/projects/{project_id}/work-products",
+		requireAuth(requireCSRF(logger, handleCreateWorkProduct(deps.Auth, deps.Projects))))
+	mux.HandleFunc("GET /api/v1/projects/{project_id}/work-products",
+		requireAuth(handleListWorkProducts(deps.Auth, deps.Projects)))
+	mux.HandleFunc("GET /api/v1/projects/{project_id}/work-products/{work_product_id}",
+		requireAuth(handleGetWorkProduct(deps.Auth, deps.Projects)))
+	mux.HandleFunc("POST /api/v1/projects/{project_id}/work-products/{work_product_id}/revisions",
+		requireAuth(requireCSRF(logger, handleReviseWorkProduct(deps.Auth, deps.Projects))))
+	mux.HandleFunc("POST /api/v1/projects/{project_id}/work-products/{work_product_id}/retire",
+		requireAuth(requireCSRF(logger, handleRetireWorkProduct(deps.Auth, deps.Projects))))
+
 	handler := withSession(deps.Auth, deps.CookieSecure, mux)
 	return withRequestLogging(logger, withRecovery(logger, handler))
 }

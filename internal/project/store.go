@@ -62,11 +62,15 @@ type WorkProductRevision struct {
 }
 
 type WorkProduct struct {
-	ID     uuid.UUID
-	Code   string
-	Type   string
-	Title  string
-	Status string
+	ID             uuid.UUID
+	ProjectID      uuid.UUID
+	Code           string
+	Type           string
+	Profile        string
+	Title          string
+	Status         string
+	Classification string
+	RowVersion     int64
 }
 
 // ProjectDetail — проєкт разом з обов'язковим планом, повернений одразу після створення/читання.
@@ -172,7 +176,10 @@ func (s *Store) CreateWithPlan(ctx context.Context, actorID uuid.UUID, code, nam
 			ID: projectID, Code: code, Name: name, Description: description,
 			Status: "active", CreatedBy: actorID, RowVersion: 1,
 		},
-		Plan: WorkProduct{ID: planWorkProductID, Code: planWorkProductCode, Type: planType, Title: planTitle, Status: "draft"},
+		Plan: WorkProduct{
+			ID: planWorkProductID, ProjectID: projectID, Code: planWorkProductCode, Type: planType,
+			Profile: planProfile, Title: planTitle, Status: "draft", Classification: planClassification, RowVersion: 1,
+		},
 		PlanLatest: WorkProductRevision{
 			ID: revisionID, WorkProductID: planWorkProductID, RevisionNumber: 1,
 			Body: body, Metadata: metadata, PayloadHash: payloadHash, ContentHash: contentHash, CreatedBy: actorID,
@@ -199,7 +206,7 @@ func (s *Store) Get(ctx context.Context, projectID uuid.UUID) (ProjectDetail, er
 	}
 
 	err = s.pool.QueryRow(ctx,
-		`SELECT wp.id, wp.code, wp.type, wp.title, wp.status,
+		`SELECT wp.id, wp.project_id, wp.code, wp.type, wp.profile, wp.title, wp.status, wp.classification, wp.row_version,
 		        r.id, r.revision_number, r.body, r.metadata, r.payload_hash, r.content_hash, r.created_by, r.created_at
 		 FROM core.project_plan_bindings b
 		 JOIN core.work_products wp ON wp.id = b.plan_work_product_id
@@ -207,7 +214,8 @@ func (s *Store) Get(ctx context.Context, projectID uuid.UUID) (ProjectDetail, er
 		 WHERE b.project_id = $1
 		 ORDER BY r.revision_number DESC LIMIT 1`,
 		projectID,
-	).Scan(&detail.Plan.ID, &detail.Plan.Code, &detail.Plan.Type, &detail.Plan.Title, &detail.Plan.Status,
+	).Scan(&detail.Plan.ID, &detail.Plan.ProjectID, &detail.Plan.Code, &detail.Plan.Type, &detail.Plan.Profile,
+		&detail.Plan.Title, &detail.Plan.Status, &detail.Plan.Classification, &detail.Plan.RowVersion,
 		&detail.PlanLatest.ID, &detail.PlanLatest.RevisionNumber, &detail.PlanLatest.Body, &detail.PlanLatest.Metadata,
 		&detail.PlanLatest.PayloadHash, &detail.PlanLatest.ContentHash, &detail.PlanLatest.CreatedBy, &detail.PlanLatest.CreatedAt)
 	if err != nil {
