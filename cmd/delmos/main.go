@@ -20,6 +20,7 @@ import (
 	"delmos/internal/migrate"
 	"delmos/internal/project"
 	"delmos/internal/ratelimit"
+	"delmos/internal/repository"
 	"delmos/internal/server"
 	"delmos/internal/storage/postgres"
 	"delmos/internal/version"
@@ -87,6 +88,7 @@ func run() error {
 		Ready:        ready,
 		Auth:         auth.NewService(authStore),
 		Projects:     project.NewStore(pool),
+		Repositories: repository.NewStore(pool, repository.NewPlainGitProvider()),
 		LoginLimiter: ratelimit.New(rate.Every(3*time.Second), 5), // 5 спроб одразу, далі 1 на 3 секунди на IP
 		CookieSecure: cfg.Server.CookieSecure,
 	}

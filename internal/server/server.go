@@ -16,6 +16,7 @@ import (
 	"delmos/internal/config"
 	"delmos/internal/project"
 	"delmos/internal/ratelimit"
+	"delmos/internal/repository"
 	"delmos/internal/version"
 )
 
@@ -30,6 +31,7 @@ type Deps struct {
 	Ready        ReadinessCheck
 	Auth         *auth.Service
 	Projects     *project.Store
+	Repositories *repository.Store
 	LoginLimiter *ratelimit.Limiter
 	CookieSecure bool
 }
@@ -116,6 +118,13 @@ func newRouter(logger *slog.Logger, deps Deps) http.Handler {
 		requireAuth(requireCSRF(logger, handleReviseWorkProduct(deps.Auth, deps.Projects))))
 	mux.HandleFunc("POST /api/v1/projects/{project_id}/work-products/{work_product_id}/retire",
 		requireAuth(requireCSRF(logger, handleRetireWorkProduct(deps.Auth, deps.Projects))))
+
+	mux.HandleFunc("POST /api/v1/projects/{project_id}/repository",
+		requireAuth(requireCSRF(logger, handleBindRepository(deps.Auth, deps.Repositories))))
+	mux.HandleFunc("GET /api/v1/projects/{project_id}/repository",
+		requireAuth(handleGetRepository(deps.Auth, deps.Repositories)))
+	mux.HandleFunc("POST /api/v1/projects/{project_id}/work-products/{work_product_id}/export",
+		requireAuth(requireCSRF(logger, handleExportWorkProduct(deps.Auth, deps.Projects, deps.Repositories))))
 
 	handler := withSession(deps.Auth, deps.CookieSecure, mux)
 	return withRequestLogging(logger, withRecovery(logger, handler))
