@@ -14,6 +14,7 @@ import (
 
 	"delmos/internal/auth"
 	"delmos/internal/config"
+	"delmos/internal/project"
 	"delmos/internal/ratelimit"
 	"delmos/internal/version"
 )
@@ -28,6 +29,7 @@ const readinessTimeout = 5 * time.Second
 type Deps struct {
 	Ready        ReadinessCheck
 	Auth         *auth.Service
+	Projects     *project.Store
 	LoginLimiter *ratelimit.Limiter
 	CookieSecure bool
 }
@@ -94,6 +96,15 @@ func newRouter(logger *slog.Logger, deps Deps) http.Handler {
 	mux.HandleFunc("POST /api/v1/auth/logout",
 		requireAuth(requireCSRF(logger, handleLogout(deps.Auth, deps.CookieSecure))))
 	mux.HandleFunc("GET /api/v1/auth/session", requireAuth(handleCurrentSession()))
+
+	mux.HandleFunc("POST /api/v1/role-bindings",
+		requireAuth(requireCSRF(logger, handleGrantSystemRole(deps.Auth))))
+	mux.HandleFunc("DELETE /api/v1/role-bindings/{binding_id}",
+		requireAuth(requireCSRF(logger, handleRevokeRoleBinding(deps.Auth))))
+
+	mux.HandleFunc("POST /api/v1/projects", requireAuth(requireCSRF(logger, handleCreateProject(deps.Projects))))
+	mux.HandleFunc("GET /api/v1/projects", requireAuth(handleListProjects(deps.Projects)))
+	mux.HandleFunc("GET /api/v1/projects/{project_id}", requireAuth(handleGetProject(deps.Auth, deps.Projects)))
 
 	handler := withSession(deps.Auth, deps.CookieSecure, mux)
 	return withRequestLogging(logger, withRecovery(logger, handler))

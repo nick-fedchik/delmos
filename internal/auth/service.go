@@ -36,12 +36,12 @@ func (s *Service) Login(ctx context.Context, login, password, ip, userAgent stri
 
 	user, err := s.store.FindActiveUserByLogin(ctx, login)
 	if err != nil {
-		_ = s.store.RecordAuditEvent(ctx, nil, "auth.login", "denied", correlationID, map[string]any{"login": login})
+		_ = s.store.RecordAuditEvent(ctx, nil, "auth.login", "system", nil, "denied", correlationID, map[string]any{"login": login})
 		return LoginResult{}, err
 	}
 
 	if !user.IsActive {
-		_ = s.store.RecordAuditEvent(ctx, &user.ID, "auth.login", "denied", correlationID, map[string]any{"reason": "inactive"})
+		_ = s.store.RecordAuditEvent(ctx, &user.ID, "auth.login", "system", nil, "denied", correlationID, map[string]any{"reason": "inactive"})
 		return LoginResult{}, ErrAccountInactive
 	}
 
@@ -50,7 +50,7 @@ func (s *Service) Login(ctx context.Context, login, password, ip, userAgent stri
 		return LoginResult{}, fmt.Errorf("перевірка пароля: %w", err)
 	}
 	if !valid {
-		_ = s.store.RecordAuditEvent(ctx, &user.ID, "auth.login", "denied", correlationID, map[string]any{"reason": "bad_password"})
+		_ = s.store.RecordAuditEvent(ctx, &user.ID, "auth.login", "system", nil, "denied", correlationID, map[string]any{"reason": "bad_password"})
 		return LoginResult{}, ErrInvalidCredentials
 	}
 
@@ -74,7 +74,7 @@ func (s *Service) Login(ctx context.Context, login, password, ip, userAgent stri
 		return LoginResult{}, err
 	}
 
-	if err := s.store.RecordAuditEvent(ctx, &user.ID, "auth.login", "success", correlationID, map[string]any{}); err != nil {
+	if err := s.store.RecordAuditEvent(ctx, &user.ID, "auth.login", "system", nil, "success", correlationID, map[string]any{}); err != nil {
 		return LoginResult{}, err
 	}
 
@@ -110,6 +110,65 @@ func (s *Service) Authenticate(ctx context.Context, rawToken string) (AuthContex
 // Logout відкликає сесію; повторний виклик того самого токена є безпечним no-op.
 func (s *Service) Logout(ctx context.Context, rawToken string) error {
 	return s.store.RevokeSession(ctx, HashToken(rawToken))
+}
+
+// ActiveProjectPermissions повертає дозволи актора в конкретному Project scope
+// (SWR-42 §3): використовується обробниками поза межами середовища сесії.
+func (s *Service) ActiveProjectPermissions(ctx context.Context, userID, projectID uuid.UUID) (map[string]bool, error) {
+	return s.store.ActiveProjectPermissions(ctx, userID, projectID)
+}
+
+// GrantSystemRole видає System-scope RoleBinding; повертає ErrRoleUnknown чи
+// ErrUserUnknown, якщо роль або отримувач не існують (SWR-43).
+func (s *Service) GrantSystemRole(ctx context.Context, granterID, userID uuid.UUID, roleKey, reason string) (uuid.UUID, error) {
+	roleOK, err := s.store.RoleExists(ctx, roleKey)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	if !roleOK {
+		return uuid.Nil, ErrRoleUnknown
+	}
+
+	userOK, err := s.store.UserExists(ctx, userID)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	if !userOK {
+		return uuid.Nil, ErrUserUnknown
+	}
+
+	bindingID, err := s.store.GrantSystemRole(ctx, granterID, userID, roleKey, reason)
+	if err != nil {
+		return uuid.Nil, err
+	}
+
+	correlationID := uuid.New()
+	if err := s.store.RecordAuditEvent(ctx, &granterID, "access.grant", "system", nil, "success", correlationID,
+		map[string]any{"role_key": roleKey, "user_id": userID.String()}); err != nil {
+		return uuid.Nil, err
+	}
+
+	return bindingID, nil
+}
+
+// RevokeRoleBinding відкликає RoleBinding; false означає, що прив'язку вже було
+// відкликано раніше (безпечний no-op, а не помилка).
+func (s *Service) RevokeRoleBinding(ctx context.Context, revokerID, bindingID uuid.UUID) (bool, error) {
+	revoked, err := s.store.RevokeRoleBinding(ctx, bindingID)
+	if err != nil {
+		return false, err
+	}
+	if !revoked {
+		return false, nil
+	}
+
+	correlationID := uuid.New()
+	if err := s.store.RecordAuditEvent(ctx, &revokerID, "access.revoke", "system", nil, "success", correlationID,
+		map[string]any{"binding_id": bindingID.String()}); err != nil {
+		return false, err
+	}
+
+	return true, nil
 }
 
 // CheckCSRF звіряє заголовок X-CSRF-Token із секретом сесії в сталий за часом спосіб.

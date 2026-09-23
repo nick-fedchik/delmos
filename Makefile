@@ -40,7 +40,7 @@ test: ## Модульні тести з перевіркою гонок
 
 test-integration: ## Тести, що потребують PostgreSQL (DELMOS_TEST_DSN, за потреби DELMOS_TEST_TEMPLATE)
 	@test -n "$(DELMOS_TEST_DSN)" || { echo "Задайте DELMOS_TEST_DSN (див. make db-test-setup)"; exit 1; }
-	go test -race -count=1 ./internal/migrate/... ./internal/auth/... ./internal/server/...
+	go test -race -count=1 ./internal/migrate/... ./internal/auth/... ./internal/project/... ./internal/server/...
 
 fmt: ## Відформатувати код
 	gofmt -w cmd internal

@@ -10,4 +10,6 @@ var (
 	ErrSessionInvalid     = errors.New("сесія недійсна або завершена")
 	ErrCSRFMismatch       = errors.New("невідповідність CSRF-токена")
 	ErrRateLimited        = errors.New("забагато спроб входу, спробуйте пізніше")
+	ErrRoleUnknown        = errors.New("невідома роль")
+	ErrUserUnknown        = errors.New("невідомий користувач")
 )

@@ -150,14 +150,90 @@ func (s *Store) ActivePermissions(ctx context.Context, userID uuid.UUID) (map[st
 }
 
 // RecordAuditEvent фіксує незмінний доказ рішення (ADR-010): аудит не залежить від outbox.
-func (s *Store) RecordAuditEvent(ctx context.Context, actorUserID *uuid.UUID, action, outcome string, correlationID uuid.UUID, detail map[string]any) error {
+func (s *Store) RecordAuditEvent(ctx context.Context, actorUserID *uuid.UUID, action, scopeType string, scopeID *uuid.UUID, outcome string, correlationID uuid.UUID, detail map[string]any) error {
 	_, err := s.pool.Exec(ctx,
-		`INSERT INTO core.audit_events (actor_user_id, action, scope_type, outcome, detail, correlation_id)
-		 VALUES ($1, $2, 'system', $3, $4, $5)`,
-		actorUserID, action, outcome, detail, correlationID)
+		`INSERT INTO core.audit_events (actor_user_id, action, scope_type, scope_id, outcome, detail, correlation_id)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+		actorUserID, action, scopeType, scopeID, outcome, detail, correlationID)
 	if err != nil {
 		return fmt.Errorf("запис аудиторської події: %w", err)
 	}
 
 	return nil
+}
+
+// ActiveProjectPermissions повертає об'єднання permission_keys усіх чинних RoleBinding
+// користувача саме в цьому Project scope (права одного проєкту не переходять до іншого, SWR-42 §3).
+func (s *Store) ActiveProjectPermissions(ctx context.Context, userID, projectID uuid.UUID) (map[string]bool, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT rd.permission_keys FROM core.role_bindings rb
+		 JOIN core.role_definitions rd ON rd.key = rb.role_key
+		 WHERE rb.user_id = $1 AND rb.scope_type = 'project' AND rb.scope_id = $2
+		   AND rb.revoked_at IS NULL AND (rb.expires_at IS NULL OR rb.expires_at > now())`,
+		userID, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("читання активних ролей проєкту: %w", err)
+	}
+	defer rows.Close()
+
+	permissions := make(map[string]bool)
+	for rows.Next() {
+		var keys []string
+		if err := rows.Scan(&keys); err != nil {
+			return nil, fmt.Errorf("розбір дозволів ролі проєкту: %w", err)
+		}
+		for _, key := range keys {
+			permissions[key] = true
+		}
+	}
+
+	return permissions, rows.Err()
+}
+
+// RoleExists перевіряє наявність ролі в каталозі перед видачею RoleBinding.
+func (s *Store) RoleExists(ctx context.Context, roleKey string) (bool, error) {
+	var exists bool
+	err := s.pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM core.role_definitions WHERE key = $1)`, roleKey).Scan(&exists)
+	if err != nil {
+		return false, fmt.Errorf("перевірка наявності ролі: %w", err)
+	}
+	return exists, nil
+}
+
+// UserExists перевіряє наявність активного користувача перед видачею RoleBinding.
+func (s *Store) UserExists(ctx context.Context, userID uuid.UUID) (bool, error) {
+	var exists bool
+	err := s.pool.QueryRow(ctx,
+		`SELECT EXISTS (SELECT 1 FROM core.users WHERE id = $1 AND is_active)`, userID).Scan(&exists)
+	if err != nil {
+		return false, fmt.Errorf("перевірка наявності користувача: %w", err)
+	}
+	return exists, nil
+}
+
+// GrantSystemRole видає System-scope RoleBinding (SWR-43): грантер не може підвищити себе
+// понад власную стелю (перевіряється викликаючо на рівні HTTP-шару через наявність access.grant).
+func (s *Store) GrantSystemRole(ctx context.Context, granterID, userID uuid.UUID, roleKey, reason string) (uuid.UUID, error) {
+	var bindingID uuid.UUID
+	err := s.pool.QueryRow(ctx,
+		`INSERT INTO core.role_bindings (user_id, role_key, scope_type, scope_id, granted_by, granted_reason)
+		 VALUES ($1, $2, 'system', NULL, $3, $4) RETURNING id`,
+		userID, roleKey, granterID, reason,
+	).Scan(&bindingID)
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("видача System-scope ролі: %w", err)
+	}
+
+	return bindingID, nil
+}
+
+// RevokeRoleBinding відкликає чинну прив'язку; повторний виклик без чинного запису — безпечний no-op.
+func (s *Store) RevokeRoleBinding(ctx context.Context, bindingID uuid.UUID) (bool, error) {
+	tag, err := s.pool.Exec(ctx,
+		`UPDATE core.role_bindings SET revoked_at = now() WHERE id = $1 AND revoked_at IS NULL`, bindingID)
+	if err != nil {
+		return false, fmt.Errorf("відкликання RoleBinding: %w", err)
+	}
+
+	return tag.RowsAffected() > 0, nil
 }
