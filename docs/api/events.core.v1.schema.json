@@ -1,0 +1,89 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:delmos:core:event-envelope:v1",
+  "title": "DELMOS Core event envelope v1 (target)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "event_id",
+    "event_key",
+    "schema_version",
+    "source",
+    "occurred_at",
+    "recorded_at",
+    "scope",
+    "actor",
+    "correlation_id",
+    "causation_id",
+    "payload"
+  ],
+  "properties": {
+    "event_id": { "type": "string", "format": "uuid" },
+    "event_key": {
+      "enum": [
+        "project.created",
+        "access.role_granted",
+        "access.role_revoked",
+        "wp.revision_committed",
+        "wp.submitted",
+        "wp.reviewed",
+        "wp.changes_requested",
+        "wp.approved",
+        "plan.applied"
+      ]
+    },
+    "schema_version": { "const": "1.0.0" },
+    "source": { "type": "string", "minLength": 1 },
+    "occurred_at": { "type": "string", "format": "date-time" },
+    "recorded_at": { "type": "string", "format": "date-time" },
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["scope_type", "scope_id"],
+      "properties": {
+        "scope_type": { "enum": ["programme", "project"] },
+        "scope_id": { "type": "string", "format": "uuid" }
+      }
+    },
+    "actor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["user_id", "role"],
+      "properties": {
+        "user_id": { "type": "string", "format": "uuid" },
+        "role": { "type": "string", "minLength": 1 }
+      }
+    },
+    "correlation_id": { "type": "string", "minLength": 1 },
+    "causation_id": { "type": "string", "minLength": 1 },
+    "payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["project_id"],
+      "properties": {
+        "project_id": { "type": "string", "format": "uuid" },
+        "work_product_id": { "type": "string", "format": "uuid" },
+        "revision_id": { "type": "string", "format": "uuid" },
+        "payload_hash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "review_request_id": { "type": "string", "format": "uuid" },
+        "decision_id": { "type": "string", "format": "uuid" },
+        "role_binding_id": { "type": "string", "format": "uuid" },
+        "config_generation": { "type": "integer", "minimum": 1 }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "event_key": { "enum": ["wp.revision_committed", "wp.submitted", "wp.reviewed", "wp.changes_requested", "wp.approved", "plan.applied"] } } },
+      "then": { "properties": { "payload": { "type": "object", "required": ["work_product_id", "revision_id", "payload_hash"], "properties": { "work_product_id": {}, "revision_id": {}, "payload_hash": {} } } } }
+    },
+    {
+      "if": { "properties": { "event_key": { "enum": ["access.role_granted", "access.role_revoked"] } } },
+      "then": { "properties": { "payload": { "type": "object", "required": ["role_binding_id"], "properties": { "role_binding_id": {} } } } }
+    },
+    {
+      "if": { "properties": { "event_key": { "const": "plan.applied" } } },
+      "then": { "properties": { "payload": { "type": "object", "required": ["config_generation"], "properties": { "config_generation": {} } } } }
+    }
+  ]
+}
