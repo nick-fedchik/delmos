@@ -1,12 +1,74 @@
-/* Мінімальний утилітарний шар без стороннього дизайн-фреймворка (v0.6.0).
-   Повна дизайн-система Pajamas — окрема майбутня ітерація (docs/architecture/gui/DESIGN_SYSTEM.md). */
+/* ==========================================================================
+   DELMOS Web GUI — Design System & Tokens (Pajamas & APMS Unified Standards)
+   v1.0.16 — Semantic tokens, 8px spacing scale, accessible typography & contrast
+   ========================================================================== */
 :root {
   color-scheme: light;
-  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  font-family: 'GitLab Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Noto Sans', Ubuntu, Cantarell, 'Helvetica Neue', sans-serif;
+  
+  /* --- Semantic Palette (Light Mode aligned with GitLab Pajamas) --- */
+  --color-surface: #ffffff;
+  --color-surface-subtle: #f8fafc;
+  --color-surface-strong: #f1f5f9;
+  
   --color-border: #d0d7de;
-  --color-text-muted: #57606a;
-  --color-danger: #b32424;
-  --color-bg-subtle: #f6f8fa;
+  --color-border-subtle: #e2e8f0;
+  --color-border-strong: #94a3b8;
+  
+  --color-text: #1f2328;
+  --color-text-secondary: #475569;
+  --color-text-muted: #64748b;
+  --color-text-disabled: #94a3b8;
+  
+  --color-primary: #0969da;
+  --color-primary-hover: #085ec4;
+  --color-primary-active: #064b9e;
+  --color-primary-subtle: #ddf4ff;
+  
+  --color-success: #1a7f37;
+  --color-success-subtle: #dafbe1;
+  --color-success-border: #b4f1c5;
+  
+  --color-warning: #9a6700;
+  --color-warning-subtle: #fff8c5;
+  --color-warning-border: #f8e3a1;
+  
+  --color-danger: #cf222e;
+  --color-danger-subtle: #ffebe9;
+  --color-danger-border: #ffc1ba;
+  
+  --color-info: #0969da;
+  --color-info-subtle: #ddf4ff;
+  --color-info-border: #b6e3ff;
+
+  --color-unsaved: #b45309;
+  --color-unsaved-subtle: #fef3c7;
+  --color-unsaved-border: #fde68a;
+
+  /* Legacy fallback aliases */
+  --color-bg-subtle: var(--color-surface-subtle);
+
+  /* --- Spacing Scale (8px Geometric System) --- */
+  --spacing-2xs: 2px;
+  --spacing-xs: 4px;
+  --spacing-sm: 8px;
+  --spacing-md: 16px;
+  --spacing-lg: 24px;
+  --spacing-xl: 32px;
+  --spacing-2xl: 48px;
+
+  /* --- Radii Hierarchy --- */
+  --radius-xs: 2px;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+  --radius-full: 9999px;
+  
+  /* --- Shadows & Elevation --- */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.06), 0 2px 4px -2px rgba(0, 0, 0, 0.04);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.08), 0 4px 6px -4px rgba(0, 0, 0, 0.03);
 }
 
 * {
@@ -15,12 +77,19 @@
 
 body {
   margin: 0;
-  background: #fff;
-  color: #1f2328;
+  background: var(--color-surface);
+  color: var(--color-text);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
 }
 
 a {
-  color: #0969da;
+  color: var(--color-primary);
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
 }
 
 button {
@@ -30,31 +99,736 @@ button {
 
 button:focus-visible,
 a:focus-visible,
-input:focus-visible {
-  outline: 2px solid #0969da;
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid var(--color-primary);
   outline-offset: 2px;
 }
 
+/* ==========================================================================
+   Оболонка застосунку (CORE_SHELL.md): верхній бар, ліва навігація,
+   робоча область, права контекстна панель, нижній статус-бар.
+   Прокручується робоча область, а не весь viewport разом з панелями.
+   ========================================================================== */
 .app-shell {
-  min-height: 100vh;
+  height: 100vh;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
+}
+
+/* Публічні сторінки (вхід) використовують мінімальну оболонку без панелей. */
+.app-shell--plain {
+  height: auto;
+  min-height: 100vh;
+  overflow: visible;
+}
+
+.skip-link {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  z-index: 200;
+  padding: 0.5rem 0.75rem;
+  background: var(--color-surface);
+  border: 1px solid var(--color-primary);
+  border-radius: var(--radius-sm);
+}
+
+.skip-link:focus {
+  left: 0.5rem;
+  top: 0.5rem;
 }
 
 .app-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0.75rem 1.25rem;
+  gap: 1rem;
+  padding: 0 1.5rem;
+  height: 52px;
+  flex-shrink: 0;
+  background: var(--color-surface);
   border-bottom: 1px solid var(--color-border);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+  z-index: 100;
 }
 
+.app-header-left {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.icon-btn {
+  background: none;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-secondary);
+  transition: background-color 0.12s ease, color 0.12s ease;
+}
+
+.icon-btn:hover {
+  background: var(--color-surface-subtle);
+  color: var(--color-text);
+}
+
+.brand-link {
+  font-weight: 700;
+  font-size: 1.125rem;
+  color: var(--color-text);
+  text-decoration: none;
+  letter-spacing: -0.02em;
+}
+
+.brand-link:hover {
+  color: var(--color-primary);
+}
+
+.app-header-center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Алерт з'являється лише при деградації або втраті зв'язку. */
+.header-alert {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.2rem 0.65rem;
+  border-radius: var(--radius-full);
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+
+.header-alert--yellow {
+  background: var(--color-warning-subtle);
+  border: 1px solid var(--color-warning-border);
+  color: var(--color-warning);
+}
+
+.header-alert--red {
+  background: var(--color-danger-subtle);
+  border: 1px solid var(--color-danger-border);
+  color: var(--color-danger);
+}
+
+.app-header-right {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.user-profile {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.user-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--color-primary);
+  color: #ffffff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.75rem;
+  font-weight: 600;
+  user-select: none;
+}
+
+.user-meta {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.2;
+}
+
+.user-name {
+  font-weight: 600;
+  font-size: 0.875rem;
+  color: var(--color-text);
+}
+
+.user-role {
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+}
+
+.app-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.app-version {
+  display: inline-block;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  background: var(--color-bg-subtle);
+  color: var(--color-text-muted);
+  font-size: 0.75rem;
+  line-height: 1;
+  padding: 0.25rem 0.375rem;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+
+/* --- Тіло оболонки --- */
+.app-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  overflow: hidden;
+  position: relative;
+}
+
+.app-shell--plain .app-body {
+  overflow: visible;
+  min-height: calc(100vh - 52px);
+}
+
+.shell-scrim {
+  position: absolute;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.35);
+  z-index: 40;
+}
+
+/* Слот тримає ширину згорнутої панелі, щоб під накладкою вміст не стрибав. */
+.panel-slot {
+  display: flex;
+  flex-shrink: 0;
+  position: relative;
+}
+
+.panel-slot--narrow {
+  width: 52px;
+}
+
+.panel-slot--narrow-right {
+  width: 48px;
+}
+
+/* --- Ліва навігаційна панель --- */
+.app-sidebar {
+  width: 240px;
+  flex-shrink: 0;
+  background: var(--color-surface-subtle);
+  border-right: 1px solid var(--color-border);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  user-select: none;
+  transition: width 0.18s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.app-sidebar--collapsed {
+  width: 52px;
+}
+
+.app-sidebar--overlay {
+  position: absolute;
+  inset-block: 0;
+  left: 0;
+  z-index: 50;
+  width: 260px;
+  box-shadow: var(--shadow-lg);
+}
+
+.sidebar-section + .sidebar-section {
+  margin-top: 0.5rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--color-border-subtle);
+}
+
+.sidebar-section-title {
+  margin: 0 0 0.35rem;
+  padding: 0 0.6rem;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sidebar-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0.45rem 0.6rem;
+  border-radius: var(--radius-md);
+  color: var(--color-text-secondary);
+  text-decoration: none;
+  font-size: 0.84375rem;
+  font-weight: 500;
+  white-space: nowrap;
+  transition: background-color 0.12s ease, color 0.12s ease;
+}
+
+.sidebar-nav-item:hover {
+  background: var(--color-surface-strong);
+  color: var(--color-text);
+  text-decoration: none;
+}
+
+.sidebar-nav-item.active {
+  background: var(--color-primary-subtle);
+  color: var(--color-primary);
+  font-weight: 600;
+}
+
+.app-sidebar--collapsed .sidebar-nav-item {
+  justify-content: center;
+  padding-inline: 0;
+}
+
+.sidebar-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sidebar-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0.5rem 0.4rem;
+}
+
+/* Спільний орган керування обох панелей: однакові шеврони внизу,
+   видимі й у згорнутому, й у розгорнутому стані. */
+.panel-footer {
+  margin-top: auto;
+  flex-shrink: 0;
+  padding: 0.4rem;
+  border-top: 1px solid var(--color-border-subtle);
+}
+
+.panel-toggle-btn {
+  position: relative;
+  width: 100%;
+  background: transparent;
+  border: none;
+  padding: 0.4rem;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-muted);
+  font-size: 0.75rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  transition: background-color 0.12s ease, color 0.12s ease;
+}
+
+.panel-toggle-btn:hover {
+  background: var(--color-surface-strong);
+  color: var(--color-text);
+}
+
+/* --- Робоча область --- */
 .app-main {
   flex: 1;
-  padding: 1.25rem;
-  max-width: 960px;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 1.5rem 2rem;
+}
+
+.app-main:focus {
+  outline: none;
+}
+
+.app-main > * {
+  max-width: 1100px;
+  margin-inline: auto;
+}
+
+.app-shell--plain .app-main {
+  overflow: visible;
+}
+
+/* --- Права контекстна панель --- */
+.app-rightbar {
+  flex-shrink: 0;
+  width: 48px;
+  display: flex;
+  flex-direction: column;
+  background: var(--color-surface-subtle);
+  border-left: 1px solid var(--color-border);
+  overflow: hidden;
+  transition: width 0.18s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.app-rightbar--open {
+  width: 340px;
+}
+
+.app-rightbar--overlay.app-rightbar--open {
+  position: absolute;
+  inset-block: 0;
+  right: 0;
+  z-index: 50;
+  box-shadow: var(--shadow-lg);
+}
+
+.rightbar-strip-badge {
+  min-width: 15px;
+  padding: 0 3px;
+  border-radius: var(--radius-full);
+  background: var(--color-danger);
+  color: #ffffff;
+  font-size: 0.625rem;
+  line-height: 15px;
+  font-weight: 700;
+}
+
+.rightbar-panel {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.rightbar-panel:focus {
+  outline: none;
+}
+
+.rightbar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.4rem 0.5rem 0.4rem 0.75rem;
+  border-bottom: 1px solid var(--color-border-subtle);
+  flex-shrink: 0;
+}
+
+.rightbar-tabs {
+  display: flex;
+  gap: 0.25rem;
+}
+
+.rightbar-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  background: transparent;
+  border: none;
+  padding: 0.3rem 0.55rem;
+  border-radius: var(--radius-md);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+}
+
+.rightbar-tab:hover {
+  background: var(--color-surface-strong);
+  color: var(--color-text);
+}
+
+.rightbar-tab.active {
+  background: var(--color-primary-subtle);
+  color: var(--color-primary);
+  font-weight: 600;
+}
+
+.rightbar-tab-badge {
+  min-width: 16px;
+  padding: 0 4px;
+  border-radius: var(--radius-full);
+  background: var(--color-danger);
+  color: #ffffff;
+  font-size: 0.625rem;
+  line-height: 16px;
+  font-weight: 700;
+}
+
+.rightbar-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.rightbar-search {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.3rem 0.5rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+}
+
+.rightbar-search input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  outline: none;
+  font: inherit;
+  font-size: 0.8125rem;
+  color: var(--color-text);
+  background: transparent;
+}
+
+.rightbar-note {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: var(--color-text-muted);
+}
+
+.help-block {
+  margin: 0;
+}
+
+.help-title {
+  margin: 0 0 0.35rem;
+  font-size: 0.9375rem;
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+.help-subtitle {
+  margin: 0 0 0.3rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-muted);
+}
+
+.help-text {
+  margin: 0;
+  font-size: 0.8125rem;
+  line-height: 1.55;
+  color: var(--color-text-secondary);
+}
+
+.help-list {
+  margin: 0;
+  padding-left: 1.1rem;
+  font-size: 0.8125rem;
+  line-height: 1.55;
+  color: var(--color-text-secondary);
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.diag-entry {
+  border: 1px solid var(--color-border-subtle);
+  border-left-width: 3px;
+  border-radius: var(--radius-md);
+  padding: 0.5rem 0.6rem;
+  background: var(--color-surface);
+}
+
+.diag-entry--error {
+  border-left-color: var(--color-danger);
+}
+
+.diag-entry--warning {
+  border-left-color: var(--color-warning);
+}
+
+.diag-entry-head {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: var(--color-text);
+}
+
+.diag-entry--error .diag-entry-head {
+  color: var(--color-danger);
+}
+
+.diag-entry--warning .diag-entry-head {
+  color: var(--color-warning);
+}
+
+.diag-entry-title {
+  font-size: 0.75rem;
+  font-weight: 600;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  overflow-wrap: anywhere;
+}
+
+.diag-entry-text {
+  margin: 0.3rem 0 0;
+  font-size: 0.8125rem;
+  color: var(--color-text-secondary);
+}
+
+.diag-entry-meta {
+  margin: 0.3rem 0 0;
+  font-size: 0.6875rem;
+  color: var(--color-text-muted);
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  overflow-wrap: anywhere;
+}
+
+/* --- Нижній статус-бар --- */
+.app-statusbar {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  height: 28px;
+  padding: 0 1rem;
+  border-top: 1px solid var(--color-border);
+  background: var(--color-surface-subtle);
+  color: var(--color-text-muted);
+  font-size: 0.6875rem;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  user-select: none;
+}
+
+.statusbar-product {
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.statusbar-spacer {
+  flex: 1;
+}
+
+.statusbar-health,
+.statusbar-diagnostics,
+.statusbar-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: 0.15rem 0.35rem;
+  color: inherit;
+  font: inherit;
+  white-space: nowrap;
+}
+
+.statusbar-health:hover:not(:disabled),
+.statusbar-diagnostics:hover,
+.statusbar-action:hover {
+  background: var(--color-surface-strong);
+  color: var(--color-text);
+}
+
+.statusbar-count--error {
+  color: var(--color-danger);
+  font-weight: 700;
+}
+
+.statusbar-count--warning {
+  color: var(--color-warning);
+  font-weight: 700;
+}
+
+.app-statusbar kbd {
+  border: 1px solid var(--color-border);
+  border-bottom-width: 2px;
+  border-radius: var(--radius-xs);
+  padding: 0 0.25rem;
+  background: var(--color-surface);
+  font-size: 0.625rem;
+}
+
+/* --- Модальне вікно --- */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+  background: rgba(15, 23, 42, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+}
+
+.modal-dialog {
   width: 100%;
-  margin: 0 auto;
+  max-width: 520px;
+  max-height: 80vh;
+  overflow-y: auto;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  padding: 1.25rem;
+}
+
+.modal-dialog:focus {
+  outline: none;
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.modal-title {
+  margin: 0;
+  font-size: 1.0625rem;
+  font-weight: 700;
+}
+
+.modal-note {
+  margin: 1rem 0 0;
+  font-size: 0.8125rem;
+}
+
+.modal-dialog kbd {
+  border: 1px solid var(--color-border);
+  border-bottom-width: 2px;
+  border-radius: var(--radius-sm);
+  padding: 0.1rem 0.35rem;
+  background: var(--color-surface-subtle);
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 0.75rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-sidebar,
+  .app-rightbar {
+    transition: none;
+  }
+}
+
+@media (max-width: 720px) {
+  .app-header {
+    padding: 0 0.75rem;
+  }
+
+  .app-header-center,
+  .user-meta {
+    display: none;
+  }
+
+  .app-main {
+    padding: 1rem;
+  }
+
+  .statusbar-action span,
+  .statusbar-product {
+    display: none;
+  }
 }
 
 .field {
@@ -81,9 +855,22 @@ input:focus-visible {
 .btn-primary {
   background: #0969da;
   color: #fff;
-  border: none;
+  border: 1px solid #0969da;
   border-radius: 6px;
   padding: 0.5rem 1rem;
+  font-weight: 500;
+  white-space: nowrap;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: #085ec4;
+  border-color: #085ec4;
+}
+
+.btn-primary:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .btn-secondary {
@@ -91,6 +878,48 @@ input:focus-visible {
   border: 1px solid var(--color-border);
   border-radius: 6px;
   padding: 0.5rem 1rem;
+  color: #1f2328;
+  font-weight: 500;
+  white-space: nowrap;
+  transition: background-color 0.15s ease;
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background: var(--color-bg-subtle);
+}
+
+/* Кнопка-посилання зі значком: значок і текст на одній базовій лінії. */
+a.btn-primary,
+a.btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  text-decoration: none;
+}
+
+a.btn-primary:hover,
+a.btn-secondary:hover {
+  text-decoration: none;
+}
+
+.btn-sm {
+  padding: 0.25rem 0.65rem;
+  font-size: 0.8125rem;
+}
+
+.btn-close {
+  background: transparent;
+  border: none;
+  font-size: 1.125rem;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+}
+
+.btn-close:hover {
+  background: var(--color-bg-subtle);
+  color: #1f2328;
 }
 
 .btn-danger {
@@ -110,11 +939,110 @@ input:focus-visible {
   margin-bottom: 0.75rem;
 }
 
-.card {
+.card,
+.editor-panel {
   border: 1px solid var(--color-border);
   border-radius: 8px;
   padding: 1rem;
   margin-bottom: 0.75rem;
+}
+
+.editor-panel {
+  padding: 0;
+  overflow: hidden;
+}
+
+.editor-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem 1rem 0.75rem;
+}
+
+.editor-heading h2 {
+  margin: 0 0 0.25rem;
+}
+
+.dirty-indicator {
+  color: #8a4b00;
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+
+.editor-panel form,
+.editor-panel > .markdown-preview {
+  padding: 0 1rem 1rem;
+}
+
+.plan-editor-content {
+  padding: 0 1rem 1rem;
+}
+
+.plan-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.editor-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  border-block: 1px solid var(--color-border);
+  padding: 0.5rem;
+  margin-bottom: 0.75rem;
+  background: var(--color-bg-subtle);
+}
+
+.toolbar-spacer {
+  flex: 1;
+}
+
+.tool-button {
+  min-width: 2rem;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  background: #fff;
+  padding: 0.3rem 0.55rem;
+}
+
+.tool-button.active {
+  background: #dbeafe;
+  border-color: #0969da;
+  color: #0969da;
+}
+
+.markdown-editor,
+.markdown-preview {
+  min-height: 22rem;
+  width: 100%;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  padding: 1rem;
+  line-height: 1.6;
+}
+
+.markdown-editor {
+  resize: vertical;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+
+.markdown-preview {
+  overflow-wrap: anywhere;
+  background: #fff;
+}
+
+.markdown-preview :first-child {
+  margin-top: 0;
+}
+
+.markdown-preview :last-child {
+  margin-bottom: 0;
+}
+
+.metadata-field {
+  margin-top: 1rem;
 }
 
 .card-list {
@@ -148,4 +1076,678 @@ input:focus-visible {
 .muted {
   color: var(--color-text-muted);
   font-size: 0.875rem;
+}
+
+.login-page {
+  display: flex;
+  flex-direction: column;
+  min-height: calc(100vh - 6.5rem);
+  justify-content: space-between;
+}
+
+.boot-status-bar {
+  margin-top: auto;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-bg-subtle);
+  font-size: 0.8125rem;
+}
+
+.boot-status-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.5rem;
+}
+
+.boot-status-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 600;
+}
+
+.boot-title-text {
+  font-size: 0.8125rem;
+}
+
+.boot-version-text {
+  font-size: 0.75rem;
+}
+
+.boot-status-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.boot-last-checked {
+  font-size: 0.75rem;
+}
+
+.boot-refresh-btn {
+  font-size: 0.75rem;
+  padding: 0.2rem 0.5rem;
+}
+
+.boot-status-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.25rem;
+  align-items: center;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.boot-status-item {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.boot-comp-name {
+  font-weight: 500;
+}
+
+.boot-comp-msg {
+  font-size: 0.75rem;
+}
+
+.status-circle {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+.status-circle.status-green {
+  background-color: #1a7f37;
+  box-shadow: 0 0 0 2px rgba(26, 127, 55, 0.2);
+}
+
+.status-circle.status-yellow {
+  background-color: #9a6700;
+  box-shadow: 0 0 0 2px rgba(154, 103, 0, 0.2);
+}
+
+.status-circle.status-red {
+  background-color: #cf222e;
+  box-shadow: 0 0 0 2px rgba(207, 34, 46, 0.2);
+}
+
+/* --- Проєкти та Empty State (Pajamas Pattern) --- */
+
+.projects-page {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.page-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.page-title {
+  font-size: 1.5rem;
+  font-weight: 700;
+  margin: 0 0 0.25rem;
+  letter-spacing: -0.02em;
+}
+
+.page-subtitle {
+  margin: 0;
+  font-size: 0.9375rem;
+}
+
+.notice-box {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1.25rem;
+  padding: 1rem 1.25rem;
+  border-radius: 8px;
+  background: #f0f7ff;
+  border: 1px solid #c8e1ff;
+}
+
+.notice-title {
+  margin: 0 0 0.25rem;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: #0550ae;
+}
+
+.notice-text {
+  margin: 0;
+  font-size: 0.875rem;
+  color: #1f2328;
+}
+
+.create-project-card {
+  border: 1px solid var(--color-border);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+  background: #ffffff;
+}
+
+.create-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 1rem;
+}
+
+.create-header h2 {
+  margin: 0 0 0.25rem;
+  font-size: 1.25rem;
+}
+
+.create-header p {
+  margin: 0;
+  font-size: 0.875rem;
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: 1fr 2fr;
+  gap: 1rem;
+}
+
+.field-hint {
+  font-size: 0.75rem;
+  margin-top: 0.15rem;
+}
+
+.form-actions {
+  display: flex;
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
+
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 3.5rem 1.5rem;
+  max-width: 560px;
+  margin: 2rem auto;
+  background: #ffffff;
+}
+
+.empty-icon-wrapper {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  background: var(--color-bg-subtle);
+  color: #0969da;
+  margin-bottom: 1.25rem;
+}
+
+.empty-title {
+  font-size: 1.25rem;
+  font-weight: 600;
+  margin: 0 0 0.5rem;
+}
+
+.empty-desc {
+  color: var(--color-text-muted);
+  font-size: 0.9375rem;
+  line-height: 1.5;
+  margin: 0 0 1.5rem;
+}
+
+.empty-cta {
+  font-size: 0.9375rem;
+  padding: 0.6rem 1.25rem;
+}
+
+.empty-note {
+  font-size: 0.8125rem;
+  margin: 0;
+}
+
+.loading-state {
+  padding: 3rem 0;
+  text-align: center;
+}
+
+.projects-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 1rem;
+}
+
+.project-card {
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 1.25rem;
+  background: #ffffff;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+  transition: box-shadow 0.15s ease, border-color 0.15s ease;
+}
+
+.project-card:hover {
+  border-color: #0969da;
+  box-shadow: 0 3px 8px rgba(9, 105, 218, 0.08);
+}
+
+.project-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.75rem;
+}
+
+.project-code {
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 0.8125rem;
+  font-weight: 700;
+  background: var(--color-bg-subtle);
+  border: 1px solid var(--color-border);
+  padding: 0.15rem 0.5rem;
+  border-radius: 4px;
+}
+
+.badge-success {
+  background: #dafbe1;
+  color: #1a7f37;
+  border-color: #b4f1c5;
+}
+
+.project-card-title {
+  margin: 0 0 1.25rem;
+  font-size: 1.0625rem;
+}
+
+.project-card-title a {
+  color: #1f2328;
+  text-decoration: none;
+}
+
+.project-card-title a:hover {
+  color: #0969da;
+}
+
+.project-card-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--color-border);
+  font-size: 0.8125rem;
+}
+
+.project-plan-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: var(--color-text-muted);
+  text-decoration: none;
+}
+
+.project-plan-link:hover {
+  color: #1f2328;
+}
+
+.project-open-link {
+  color: #0969da;
+  font-weight: 500;
+  text-decoration: none;
+}
+
+.project-open-link:hover {
+  text-decoration: underline;
+}
+
+/* ==========================================================================
+   Pajamas & APMS Unified Components: Breadcrumbs, Tabs, Badges & Detail Layouts
+   ========================================================================== */
+
+/* --- Breadcrumbs --- */
+.breadcrumbs {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  font-size: 0.8125rem;
+  color: var(--color-text-muted);
+  margin-bottom: var(--spacing-md);
+  list-style: none;
+  padding: 0;
+}
+
+.breadcrumb-item {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+}
+
+.breadcrumb-item a {
+  color: var(--color-text-secondary);
+  text-decoration: none;
+}
+
+.breadcrumb-item a:hover {
+  color: var(--color-primary);
+  text-decoration: underline;
+}
+
+.breadcrumb-separator {
+  color: var(--color-border);
+  user-select: none;
+}
+
+.breadcrumb-current {
+  color: var(--color-text);
+  font-weight: 600;
+}
+
+/* --- Badges & Pills (Pajamas Standard) --- */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  line-height: 1;
+  padding: 0.2rem 0.5rem;
+  border-radius: var(--radius-full);
+  background: var(--color-surface-subtle);
+  color: var(--color-text-secondary);
+  border: 1px solid var(--color-border);
+  text-transform: capitalize;
+}
+
+.badge-draft,
+.badge-neutral {
+  background: var(--color-surface-subtle);
+  color: var(--color-text-secondary);
+  border-color: var(--color-border);
+}
+
+.badge-success,
+.badge-active,
+.badge-approved {
+  background: var(--color-success-subtle);
+  color: var(--color-success);
+  border-color: var(--color-success-border);
+}
+
+.badge-warning,
+.badge-in_review {
+  background: var(--color-warning-subtle);
+  color: var(--color-warning);
+  border-color: var(--color-warning-border);
+}
+
+.badge-danger,
+.badge-error,
+.badge-obsolete {
+  background: var(--color-danger-subtle);
+  color: var(--color-danger);
+  border-color: var(--color-danger-border);
+}
+
+.badge-info,
+.badge-plan {
+  background: var(--color-info-subtle);
+  color: var(--color-info);
+  border-color: var(--color-info-border);
+}
+
+/* --- Unsaved State (Amber Save Button per APMS standard) --- */
+.btn-unsaved {
+  background: var(--color-unsaved) !important;
+  border-color: var(--color-unsaved) !important;
+  color: #ffffff !important;
+  box-shadow: 0 0 0 3px rgba(180, 83, 9, 0.25);
+  animation: pulse-unsaved 2s infinite ease-in-out;
+}
+
+@keyframes pulse-unsaved {
+  0% { box-shadow: 0 0 0 0 rgba(180, 83, 9, 0.4); }
+  70% { box-shadow: 0 0 0 6px rgba(180, 83, 9, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(180, 83, 9, 0); }
+}
+
+.dirty-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--color-unsaved);
+  background: var(--color-unsaved-subtle);
+  border: 1px solid var(--color-unsaved-border);
+  padding: 0.15rem 0.5rem;
+  border-radius: var(--radius-full);
+}
+
+/* --- Detail Layout & Section Cards --- */
+.detail-view {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-lg);
+}
+
+.detail-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--spacing-md);
+  padding-bottom: var(--spacing-md);
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+
+.detail-title-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+}
+
+.detail-title-row {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  flex-wrap: wrap;
+}
+
+.detail-title {
+  font-size: 1.5rem;
+  font-weight: 700;
+  margin: 0;
+  letter-spacing: -0.02em;
+}
+
+.detail-code {
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 0.875rem;
+  font-weight: 700;
+  background: var(--color-surface-subtle);
+  border: 1px solid var(--color-border);
+  padding: 0.15rem 0.5rem;
+  border-radius: var(--radius-sm);
+}
+
+.detail-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+}
+
+.section-box {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  box-shadow: var(--shadow-sm);
+}
+
+.section-box-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--spacing-md) var(--spacing-lg);
+  background: var(--color-surface-subtle);
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+
+.section-box-title {
+  margin: 0;
+  font-size: 1.0625rem;
+  font-weight: 600;
+}
+
+.section-box-desc {
+  margin: 0.15rem 0 0;
+  font-size: 0.8125rem;
+  color: var(--color-text-muted);
+}
+
+.section-box-body {
+  padding: var(--spacing-lg);
+}
+
+/* --- Довідка з підключення Git-сховища --- */
+.git-help {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-lg);
+  margin-top: var(--spacing-md);
+  padding-top: var(--spacing-md);
+  border-top: 1px solid var(--color-border-subtle);
+}
+
+.git-help-step {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+}
+
+.git-help-title {
+  margin: 0;
+  font-size: 0.875rem;
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+.git-help-text {
+  margin: 0;
+  font-size: 0.875rem;
+  color: var(--color-text-secondary);
+}
+
+.git-help-list {
+  margin: 0;
+  padding-left: 1.25rem;
+  font-size: 0.875rem;
+  color: var(--color-text-secondary);
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.git-help-note {
+  margin: 0;
+  padding: var(--spacing-sm) var(--spacing-md);
+  border-left: 3px solid var(--color-info-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-info-subtle);
+  font-size: 0.8125rem;
+  color: var(--color-text-secondary);
+}
+
+.git-help-cmd {
+  position: relative;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-strong);
+}
+
+.git-help-cmd pre {
+  margin: 0;
+  padding: var(--spacing-sm) var(--spacing-md);
+  padding-right: 7.5rem;
+  overflow-x: auto;
+}
+
+.git-help-cmd code {
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 0.8125rem;
+  line-height: 1.6;
+  color: var(--color-text);
+  white-space: pre;
+}
+
+.git-help-copy {
+  position: absolute;
+  top: var(--spacing-sm);
+  right: var(--spacing-sm);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.2rem 0.5rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-text-secondary);
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+.git-help-copy:hover {
+  background: var(--color-surface-subtle);
+  color: var(--color-text);
+}
+
+/* --- Clean Data Table (Pajamas Table Pattern) --- */
+.data-table-wrapper {
+  overflow-x: auto;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+  font-size: 0.875rem;
+}
+
+.data-table th {
+  background: var(--color-surface-subtle);
+  color: var(--color-text-secondary);
+  font-weight: 600;
+  padding: 0.65rem 1rem;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.data-table td {
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+
+.data-table tr:last-child td {
+  border-bottom: none;
+}
+
+.data-table tr:hover td {
+  background: var(--color-surface-subtle);
+}
+
+.monospace-cell {
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 0.8125rem;
 }

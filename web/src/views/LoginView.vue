@@ -2,7 +2,8 @@
 import { ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
-import { ApiError } from '@/api/client'
+import { loginErrorMessage } from '@/auth/login-error'
+import BootStatusBar from '@/components/BootStatusBar.vue'
 import { useSessionStore } from '@/stores/session'
 
 const session = useSessionStore()
@@ -23,7 +24,7 @@ async function handleSubmit(): Promise<void> {
     await router.replace(redirect)
   } catch (err) {
     // SWR-44 §2: сервер навмисно не розрізняє невідомий логін і невірний пароль.
-    error.value = err instanceof ApiError ? err.message : 'Не вдалося увійти'
+    error.value = loginErrorMessage(err)
   } finally {
     submitting.value = false
   }
@@ -31,19 +32,23 @@ async function handleSubmit(): Promise<void> {
 </script>
 
 <template>
-  <div class="card" style="max-width: 360px; margin: 3rem auto">
-    <h1>Вхід до DELMOS</h1>
-    <p v-if="error" class="alert-error" role="alert">{{ error }}</p>
-    <form @submit.prevent="handleSubmit">
-      <div class="field">
-        <label for="login">Логін</label>
-        <input id="login" v-model="login" type="text" autocomplete="username" required autofocus />
-      </div>
-      <div class="field">
-        <label for="password">Пароль</label>
-        <input id="password" v-model="password" type="password" autocomplete="current-password" required />
-      </div>
-      <button class="btn-primary" type="submit" :disabled="submitting">Увійти</button>
-    </form>
+  <div class="login-page">
+    <div class="card" style="max-width: 360px; margin: 3rem auto 1.5rem">
+      <h1>Вхід до DELMOS</h1>
+      <p v-if="error" class="alert-error" role="alert">{{ error }}</p>
+      <form @submit.prevent="handleSubmit">
+        <div class="field">
+          <label for="login">Логін</label>
+          <input id="login" v-model="login" type="text" autocomplete="username" required autofocus />
+        </div>
+        <div class="field">
+          <label for="password">Пароль</label>
+          <input id="password" v-model="password" type="password" autocomplete="current-password" required />
+        </div>
+        <button class="btn-primary" type="submit" :disabled="submitting">Увійти</button>
+      </form>
+    </div>
+
+    <BootStatusBar />
   </div>
 </template>

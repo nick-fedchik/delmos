@@ -14,6 +14,24 @@ const router = createRouter({
       props: true,
     },
     {
+      path: '/projects/:projectId/plan',
+      name: 'project-plan',
+      component: () => import('@/views/ProjectPlanView.vue'),
+      props: true,
+    },
+    {
+      path: '/projects/:projectId/stakeholders',
+      name: 'project-stakeholders',
+      component: () => import('@/views/ProjectStakeholdersView.vue'),
+      props: true,
+    },
+    {
+      path: '/projects/:projectId/risks',
+      name: 'project-risks',
+      component: () => import('@/views/ProjectRisksView.vue'),
+      props: true,
+    },
+    {
       path: '/projects/:projectId/work-products/:workProductId',
       name: 'work-product',
       component: () => import('@/views/WorkProductDetailView.vue'),
