@@ -16,6 +16,31 @@ servers:
 security:
   - sessionCookie: []
 paths:
+  /system/boot-status:
+    get:
+      operationId: getBootStatus
+      summary: Read diagnostic boot health and system component states
+      security: []
+      responses:
+        '200':
+          description: Diagnostic boot health status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BootStatusResponse'
+  /entity-definitions:
+    get:
+      operationId: listEntityDefinitions
+      summary: List registered core project-domain entities
+      responses:
+        '200':
+          description: Registered entity definitions
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/EntityDefinition' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
   /auth/login:
     post:
       operationId: login
@@ -154,6 +179,143 @@ paths:
               schema: { $ref: '#/components/schemas/ProjectView' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/Hidden' }
+  /projects/{project_id}/plan:
+    get:
+      operationId: getProjectPlan
+      summary: Read the current structured Generic Project Plan revision
+      x-required-permission: project.read
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      responses:
+        '200':
+          description: Current PLAN-001 revision and its Generic Plan manifest
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PlanDetailView' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/Hidden' }
+  /projects/{project_id}/plan/revisions:
+    post:
+      operationId: reviseProjectPlan
+      summary: Create an immutable draft revision of the Generic Project Plan
+      x-required-permission: wp.edit
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReviseProjectPlan' }
+      responses:
+        '201':
+          description: New plan revision and its validated manifest
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PlanDetailView' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/Hidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/Invariant' }
+  /projects/{project_id}/plan/apply:
+    post:
+      operationId: applyProjectPlan
+      summary: Apply a plan revision to update effective configuration and projections
+      x-required-permission: plan.apply
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ApplyProjectPlan' }
+      responses:
+        '200':
+          description: Plan applied and configuration generation updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PlanApplied' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/Hidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/Invariant' }
+  /projects/{project_id}/stakeholders:
+    get:
+      operationId: listStakeholders
+      summary: List registered stakeholders in project scope
+      x-required-permission: project.read
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      responses:
+        '200':
+          description: List of stakeholders
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Stakeholder' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/Hidden' }
+    post:
+      operationId: createStakeholder
+      summary: Register a stakeholder in project scope
+      x-required-permission: wp.create
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateStakeholder' }
+      responses:
+        '201':
+          description: Stakeholder created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Stakeholder' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/Hidden' }
+        '422': { $ref: '#/components/responses/Invariant' }
+  /projects/{project_id}/risks:
+    get:
+      operationId: listRisks
+      summary: List registered operational risks in project scope
+      x-required-permission: project.read
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      responses:
+        '200':
+          description: List of risks
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/ProjectRisk' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/Hidden' }
+    post:
+      operationId: createRisk
+      summary: Register an operational risk in project scope
+      x-required-permission: wp.create
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateRisk' }
+      responses:
+        '201':
+          description: Risk created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProjectRisk' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/Hidden' }
+        '422': { $ref: '#/components/responses/Invariant' }
   /projects/{project_id}/work-products:
     post:
       operationId: createWorkProduct
@@ -398,6 +560,26 @@ components:
             code: { type: string }
             message: { type: string }
 
+    BootStatusResponse:
+      type: object
+      required: [status, version, components]
+      properties:
+        status: { type: string, enum: [green, yellow, red] }
+        version: { type: string }
+        components:
+          type: array
+          items:
+            $ref: '#/components/schemas/ComponentHealth'
+
+    ComponentHealth:
+      type: object
+      required: [id, name, status, message]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        status: { type: string, enum: [green, yellow, red] }
+        message: { type: string }
+
     UserView:
       type: object
       required: [id, login, permissions]
@@ -417,6 +599,16 @@ components:
         expires_at: { type: string, format: date-time }
         user: { $ref: '#/components/schemas/UserView' }
 
+    EntityDefinition:
+      type: object
+      required: [key, name, category, owner_module, description]
+      properties:
+        key: { type: string }
+        name: { type: string }
+        category: { type: string, enum: [configuration, operational, evidence] }
+        owner_module: { type: string }
+        description: { type: string }
+
     CreateProject:
       type: object
       required: [code, name]
@@ -433,10 +625,117 @@ components:
         type: { type: string, enum: [plan] }
         title: { type: string }
         status: { type: string, enum: [draft, in_review, approved, obsolete] }
-        revision_number: { type: integer }
+        revision_number: { type: integer, minimum: 1 }
         body: { type: string }
         metadata: { type: object }
         payload_hash: { type: string }
+
+    PlanDetailView:
+      type: object
+      required: [work_product_id, code, title, status, row_version, revision_id, revision_number, payload_hash, body, template_key, template_version, manifest]
+      properties:
+        work_product_id: { type: string, format: uuid }
+        code: { type: string, const: PLAN-001 }
+        title: { type: string }
+        status: { type: string, enum: [draft, in_review, approved, obsolete] }
+        row_version: { type: integer, minimum: 1 }
+        revision_id: { type: string, format: uuid }
+        revision_number: { type: integer, minimum: 1 }
+        payload_hash: { type: string }
+        body: { type: string }
+        template_key: { type: string, const: generic-project-plan }
+        template_version: { type: integer, const: 1 }
+        manifest: { $ref: '#/components/schemas/GenericPlanManifest' }
+
+    ReviseProjectPlan:
+      type: object
+      required: [expected_row_version, body, manifest]
+      properties:
+        expected_row_version: { type: integer, minimum: 1 }
+        body: { type: string }
+        manifest: { $ref: '#/components/schemas/GenericPlanManifest' }
+
+    ApplyProjectPlan:
+      type: object
+      required: [expected_row_version]
+      properties:
+        expected_row_version: { type: integer, minimum: 1 }
+        revision_id: { type: string, format: uuid }
+
+    PlanApplied:
+      type: object
+      required: [effective_plan_revision_id, config_generation, row_version]
+      properties:
+        effective_plan_revision_id: { type: string, format: uuid }
+        config_generation: { type: integer, minimum: 1 }
+        row_version: { type: integer, minimum: 1 }
+
+    Stakeholder:
+      type: object
+      required: [id, project_id, kind, name, contact_ref, interest, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        project_id: { type: string, format: uuid }
+        kind: { type: string, enum: [user, organization, external_party] }
+        name: { type: string }
+        contact_ref: { type: string }
+        interest: { type: string }
+        created_at: { type: string, format: date-time }
+
+    CreateStakeholder:
+      type: object
+      required: [kind, name]
+      properties:
+        kind: { type: string, enum: [user, organization, external_party] }
+        name: { type: string }
+        contact_ref: { type: string }
+        interest: { type: string }
+
+    ProjectRisk:
+      type: object
+      required: [id, project_id, title, status, impact, likelihood, response_strategy, owner_ref, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        project_id: { type: string, format: uuid }
+        title: { type: string }
+        description: { type: string }
+        status: { type: string, enum: [identified, analyzed, mitigated, closed] }
+        impact: { type: string, enum: [low, medium, high, critical] }
+        likelihood: { type: string, enum: [low, medium, high] }
+        response_strategy: { type: string }
+        owner_ref: { type: string }
+        created_at: { type: string, format: date-time }
+
+    CreateRisk:
+      type: object
+      required: [title]
+      properties:
+        title: { type: string }
+        description: { type: string }
+        impact: { type: string, enum: [low, medium, high, critical] }
+        likelihood: { type: string, enum: [low, medium, high] }
+        response_strategy: { type: string }
+        owner_ref: { type: string }
+
+    GenericPlanManifest:
+      type: object
+      required: [objectives, scope_items, assumptions, constraints, responsibility_assignments, deliverables, phases, milestones, acceptance_rules, governance, extensions]
+      properties:
+        objectives: { type: array, items: { type: object } }
+        scope_items: { type: array, items: { type: object } }
+        assumptions: { type: array, items: { type: object } }
+        constraints: { type: array, items: { type: object } }
+        responsibility_assignments: { type: array, items: { type: object } }
+        deliverables: { type: array, items: { type: object } }
+        phases: { type: array, items: { type: object } }
+        milestones: { type: array, items: { type: object } }
+        acceptance_rules: { type: array, items: { type: object } }
+        governance:
+          type: object
+          required: [change_control_required]
+          properties:
+            change_control_required: { type: boolean }
+        extensions: { type: object }
 
     ProjectView:
       type: object
@@ -480,9 +779,10 @@ components:
 
     WorkProductRevisionView:
       type: object
-      required: [revision_number, body, metadata, payload_hash, content_hash]
+      required: [revision_id, revision_number, body, metadata, payload_hash, content_hash]
       properties:
-        revision_number: { type: integer }
+        revision_id: { type: string, format: uuid }
+        revision_number: { type: integer, minimum: 1 }
         body: { type: string }
         metadata: { type: object }
         payload_hash: { type: string }

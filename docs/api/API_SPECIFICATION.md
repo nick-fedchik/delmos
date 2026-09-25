@@ -59,6 +59,15 @@ GET /api/v1/projects/{project_id}/work-products?page=1&limit=50&sort=updated_at&
 }
 ```
 
+### 1.6. Діагностика завантаження та інтеграцій (Boot Health)
+
+```text
+GET /api/v1/system/boot-status
+GET /boot-status
+```
+
+Публічний ендпоінт перевірки стану завантаження платформи та готовності її компонентів (ядро, СУБД PostgreSQL, схема міграцій, сховище репозиторіїв) для нижнього статус-бару екрана входу. Повертає статус кожного компонента (`green`, `yellow`, `red`) без розкриття чутливих деталей конфігурації.
+
 | HTTP-статус | Значення |
 | --- | --- |
 | `400 Bad Request` | Некоректний синтаксис запиту |
@@ -94,6 +103,19 @@ POST /api/v1/programmes/{programme_id}/projects
 GET /api/v1/projects/{project_id}
 ```
 
+### 2.3. Прочитати та редагувати Generic Project Plan
+
+```text
+GET  /api/v1/projects/{project_id}/plan
+POST /api/v1/projects/{project_id}/plan/revisions
+```
+
+`GET` повертає поточну ревізію системного `PLAN-001`, її шаблон
+`generic-project-plan@1` та структурований маніфест. `POST` приймає повний
+маніфест, `body` з пояснювальними Markdown-нотатками та `expected_row_version`.
+Успішне збереження створює наступну immutable revision; номер revision екземпляра
+не залежить від версії шаблону.
+
 ## 3. Артефакти (Work Products)
 
 ### 3.1. Список артефактів проєкту
@@ -127,6 +149,20 @@ POST /api/v1/projects/{project_id}/specifications
 ```
 
 Див. повну схему в [SPEC-01: рушій композитних специфікацій](../specifications/SPEC-01-COMPOSITE-SPECIFICATIONS-ENGINE.md).
+
+### 4.2. Прочитати незмінний snapshot специфікації
+
+```text
+GET /api/v1/projects/{project_id}/specifications/{specification_id}
+```
+
+### 4.3. Створити нову ревізію специфікації
+
+```text
+POST /api/v1/projects/{project_id}/specifications/{specification_id}/revisions
+```
+
+Запит містить `expected_row_version`; застаріла версія відхиляється з `409 Conflict`, а попередній manifest залишається незмінним.
 
 ## 5. Зв'язки трасованості (Trace Links)
 

@@ -15,6 +15,8 @@
 | [SPEC-03: Project Economics & EVM Models](SPEC-03-PROJECT-ECONOMICS-EVM-MODELS.md) | Схеми даних `CostBaseline`, `BudgetLine`, `LaborRate`, `ExpenseRecord`, `WorkRecord` та математичні формули EVM і P&L | Економіка, Ресурси, Метрики | SWR-39..41, ADR-006 |
 | [SPEC-04: Events, Triggers & Rules Engine](SPEC-04-EVENTS-TRIGGERS-RULES-ENGINE.md) | Специфікація конверта подій, схеми таблиць Transactional Outbox, протоколу оренди повідомлень (Lease Fencing) та FSM-правил | Автоматизація, Черга, Планувальник | SWR-12..14, SWR-23..27, ADR-007 |
 | [CORE-CONTRACT-001: базовий доступ і погодження](CORE-CONTRACT-001-ROLE-WORKFLOW.md) | Постумови першого вертикального зрізу, негативні тести й машинні контракти API/подій | Ядро, доступ, ревізії, workflow | SHR-14, SWR-42..48, ADR-009, ADR-010 |
+| [CORE-CONTRACT-002: Generic Project Plan](CORE-CONTRACT-002-GENERIC-PROJECT-PLAN.md) | Структурований нейтральний план, інваріанти, lifecycle `plan.apply` та межа модульних розширень | Ядро, планування, модулі | PM-001, PM-008..010, PM-013..016 |
+| [CORE-CONTRACT-003: Generic Plan Domain and Automation](CORE-CONTRACT-003-GENERIC-PLAN-DOMAIN-AND-AUTOMATION.md) | PMBOK/SWEBOK-обґрунтована модель базових сутностей, Work Products та event/trigger/rule handlers | Ядро, планування, автоматизація | SHR-01, SHR-06, SWR-01..04, SWR-12..27 |
 
 ---
 

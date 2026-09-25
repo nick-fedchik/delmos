@@ -5,6 +5,8 @@
 Контекст: [ядро та архітектура](ARCHITECTURE.md), [предметна модель](DOMAIN_MODEL.md),
 [проєкт і сховища](PROJECT_MODEL.md), [модульна система](MODULES.md),
 [каталог модулів](MODULE_CATALOG.md), [події, тригери та правила](EVENTS_TRIGGERS_RULES.md).
+[Точний контракт Generic Project Plan](../specifications/CORE-CONTRACT-002-GENERIC-PROJECT-PLAN.md)
+визначає машинно-виконуваний маніфест, інваріанти та межу між ядром і модулями.
 
 ---
 
@@ -53,7 +55,13 @@ flowchart TD
     CoreSections --> ContributedSections
 ```
 
-### Приклад структури маніфесту плану (`PLAN-001`):
+### Приклад структури маніфесту плану (`PLAN-001`)
+
+Цей приклад ілюструє цільову конфігурацію. Структурований маніфест є окремим
+типізованим записом ревізії, а не Markdown або довільним `metadata`. Базові
+секції Generic Plan не нав'язують методологію; ключі Scrum, ISO 26262 та
+економіки можуть з'явитися лише в `extensions` після активації відповідного
+модуля.
 
 ```yaml
 schema_version: delmos.wp.v1

@@ -74,7 +74,17 @@ flowchart TD
 
 ## 3. Структура Generic Project Plan (`PLAN-001`)
 
-План є версійованим документом у форматі Markdown із типізованим YAML frontmatter:
+Нормативна модель Generic Plan визначена в
+[CORE-CONTRACT-002](../specifications/CORE-CONTRACT-002-GENERIC-PROJECT-PLAN.md).
+Markdown є пояснювальною частиною ревізії, тоді як системна конфігурація
+зберігається у типізованому маніфесті. Наведений нижче YAML є ілюстрацією
+цільового представлення, а не форматом, який ядро витягує з Markdown.
+Версія самого плану — натуральний `revision_number` його Work Product;
+`profile_version` і `plan_schema_version` нижче є версіями форматів.
+
+План є версійованою конфігурацією з типізованим маніфестом; YAML нижче показує
+його читабельне представлення. Markdown-тіло ревізії містить лише пояснювальні
+нотатки і не є джерелом системних правил:
 
 ```yaml
 schema_version: delmos.wp.v1

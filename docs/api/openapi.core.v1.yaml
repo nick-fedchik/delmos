@@ -137,6 +137,83 @@ paths:
         '404': { $ref: '#/components/responses/Hidden' }
         '409': { $ref: '#/components/responses/Conflict' }
         '422': { $ref: '#/components/responses/Invariant' }
+  /projects/{project_id}/specifications:
+    post:
+      operationId: createSpecification
+      summary: Create a composite specification with an immutable composition manifest
+      x-required-permission: wp.create
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSpecification'
+      responses:
+        '201':
+          description: Specification Work Product and first immutable revision created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SpecificationView'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/Hidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/Invariant' }
+  /projects/{project_id}/specifications/{specification_id}:
+    get:
+      operationId: getSpecification
+      summary: Read an immutable composite specification manifest
+      x-required-permission: wp.read
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - name: specification_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Specification and exact composition manifest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SpecificationView'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/Hidden' }
+  /projects/{project_id}/specifications/{specification_id}/revisions:
+    post:
+      operationId: reviseSpecification
+      summary: Write a new immutable specification revision and manifest
+      x-required-permission: wp.edit
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - name: specification_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReviseSpecification'
+      responses:
+        '201':
+          description: New immutable specification revision created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SpecificationView'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/Hidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/Invariant' }
   /projects/{project_id}/work-products/{work_product_id}/submit:
     post:
       operationId: submitWorkProduct
@@ -322,6 +399,54 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/Hidden' }
+  /projects/{project_id}/trace-links:
+    post:
+      operationId: createTraceLink
+      summary: Create a typed traceability link between project work products
+      x-required-permission: trace.create
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTraceLink'
+      responses:
+        '201':
+          description: Traceability link created and audited
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TraceLink'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/Hidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/Invariant' }
+  /projects/{project_id}/traceability/{source_id}:
+    get:
+      operationId: traverseTraceability
+      summary: Traverse the project traceability graph from a work product
+      x-required-permission: wp.read
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - name: source_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Bounded recursive traceability path
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/TracePathEntry' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/Hidden' }
 components:
   securitySchemes:
     sessionCookie:
@@ -438,6 +563,107 @@ components:
         title: { type: string, minLength: 1 }
         body: { type: string }
         metadata: { type: object }
+    CreateSpecification:
+      type: object
+      additionalProperties: false
+      required: [code, title, body, manifest]
+      properties:
+        code: { type: string, minLength: 1 }
+        title: { type: string, minLength: 1 }
+        body: { type: string }
+        metadata: { type: object }
+        manifest:
+          $ref: '#/components/schemas/CompositionManifest'
+    ReviseSpecification:
+      type: object
+      additionalProperties: false
+      required: [expected_row_version, body, manifest]
+      properties:
+        expected_row_version: { type: integer, minimum: 1 }
+        body: { type: string }
+        metadata: { type: object }
+        manifest:
+          $ref: '#/components/schemas/CompositionManifest'
+    CompositionManifest:
+      type: object
+      additionalProperties: false
+      required: [manifest_version, sections, occurrences, elements_hash]
+      properties:
+        manifest_version: { const: '1.0.0' }
+        sections:
+          type: array
+          items: { $ref: '#/components/schemas/CompositionSection' }
+        occurrences:
+          type: array
+          items: { $ref: '#/components/schemas/CompositionOccurrence' }
+        elements_hash: { type: string, pattern: '^[0-9a-f]{64}$' }
+    CompositionSection:
+      type: object
+      additionalProperties: false
+      required: [section_id, title, order]
+      properties:
+        section_id: { type: string, minLength: 1 }
+        parent_section_id: { type: [string, 'null'] }
+        title: { type: string, minLength: 1 }
+        narrative: { type: string }
+        order: { type: integer, minimum: 1 }
+    CompositionOccurrence:
+      type: object
+      additionalProperties: false
+      required: [occurrence_id, section_id, target_wp_id, target_revision_id, target_payload_hash, order]
+      properties:
+        occurrence_id: { type: string, format: uuid }
+        section_id: { type: string, minLength: 1 }
+        target_wp_id: { type: string, format: uuid }
+        target_revision_id: { type: string, format: uuid }
+        target_payload_hash: { type: string, pattern: '^[0-9a-f]{64}$' }
+        order: { type: integer, minimum: 1 }
+    CreateTraceLink:
+      type: object
+      additionalProperties: false
+      required: [source_id, target_id, relation_kind]
+      properties:
+        source_id: { type: string, format: uuid }
+        source_revision_id: { type: string, format: uuid }
+        target_id: { type: string, format: uuid }
+        target_revision_id: { type: string, format: uuid }
+        relation_kind: { type: string, enum: [verifies, satisfies, refines, derives_from] }
+    TraceLink:
+      type: object
+      required: [id, source_id, target_id, relation_kind, is_suspect]
+      properties:
+        id: { type: string, format: uuid }
+        source_id: { type: string, format: uuid }
+        source_revision_id: { type: string, format: uuid }
+        target_id: { type: string, format: uuid }
+        target_revision_id: { type: string, format: uuid }
+        relation_kind: { type: string, enum: [verifies, satisfies, refines, derives_from] }
+        is_suspect: { type: boolean }
+    TracePathEntry:
+      type: object
+      required: [depth, source_id, source_code, target_id, target_code, target_type, relation_kind, is_suspect, is_cycle]
+      properties:
+        depth: { type: integer, minimum: 1 }
+        source_id: { type: string, format: uuid }
+        source_code: { type: string }
+        target_id: { type: string, format: uuid }
+        target_code: { type: string }
+        target_type: { type: string }
+        source_revision_id: { type: string, format: uuid }
+        target_revision_id: { type: string, format: uuid }
+        relation_kind: { type: string, enum: [verifies, satisfies, refines, derives_from] }
+        is_suspect: { type: boolean }
+        is_cycle: { type: boolean }
+    SpecificationView:
+      type: object
+      required: [specification_id, work_product, manifest]
+      properties:
+        specification_id: { type: string, format: uuid }
+        work_product:
+          type: object
+          additionalProperties: true
+        manifest:
+          $ref: '#/components/schemas/CompositionManifest'
     ReviseWorkProduct:
       type: object
       additionalProperties: false

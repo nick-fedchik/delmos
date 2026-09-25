@@ -1,3 +1,9 @@
+# Шаблони DELMOS
+
+| Шаблон | Призначення |
+| --- | --- |
+| [Generic Project Plan v1](GENERIC-PROJECT-PLAN-TEMPLATE-v1.json) | Початковий структурований маніфест `generic-project-plan@1` для системного `PLAN-001`. Версія шаблону не є `revision_number` конкретного плану. |
+
 # Шаблони документів DELMOS (Document Templates)
 
 Дата: 2026-09-23. Статус: нормативний реєстр шаблонів для майбутнього заповнення.
