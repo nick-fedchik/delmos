@@ -36,6 +36,7 @@ type projectView struct {
 	Description string   `json:"description"`
 	Status      string   `json:"status"`
 	Plan        planView `json:"plan"`
+	Permissions []string `json:"permissions,omitempty"`
 }
 
 type projectSummaryView struct {
@@ -45,7 +46,15 @@ type projectSummaryView struct {
 	Status string `json:"status"`
 }
 
-func toProjectView(detail project.ProjectDetail) projectView {
+func toProjectView(detail project.ProjectDetail, permissions ...map[string]bool) projectView {
+	var permKeys []string
+	if len(permissions) > 0 && permissions[0] != nil {
+		for k, v := range permissions[0] {
+			if v {
+				permKeys = append(permKeys, k)
+			}
+		}
+	}
 	return projectView{
 		ID: detail.Project.ID.String(), Code: detail.Project.Code, Name: detail.Project.Name,
 		Description: detail.Project.Description, Status: detail.Project.Status,
@@ -54,6 +63,7 @@ func toProjectView(detail project.ProjectDetail) projectView {
 			RevisionNumber: detail.PlanLatest.RevisionNumber, Body: detail.PlanLatest.Body,
 			Metadata: detail.PlanLatest.Metadata, PayloadHash: base64.RawURLEncoding.EncodeToString(detail.PlanLatest.PayloadHash),
 		},
+		Permissions: permKeys,
 	}
 }
 
@@ -150,6 +160,6 @@ func handleGetProject(authSvc *auth.Service, projects *project.Store) http.Handl
 			return
 		}
 
-		writeJSON(w, http.StatusOK, toProjectView(detail))
+		writeJSON(w, http.StatusOK, toProjectView(detail, permissions))
 	}
 }

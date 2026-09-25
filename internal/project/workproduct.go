@@ -12,6 +12,7 @@ import (
 var (
 	ErrWorkProductNotFound    = errors.New("work product не знайдено")
 	ErrInvalidWorkProductType = errors.New("невідомий тип work product")
+	ErrProjectPlanReserved    = errors.New("тип plan зарезервовано для системного Generic Project Plan")
 	ErrWorkProductCodeTaken   = errors.New("код work product вже використовується в цьому проєкті")
 	ErrVersionConflict        = errors.New("work product змінено іншим запитом (конфлікт версії)")
 	ErrWorkProductObsolete    = errors.New("work product виведено з експлуатації (obsolete)")
@@ -26,6 +27,9 @@ var coreWorkProductTypes = map[string]bool{
 // CreateWorkProduct створює чернетку базового типу з першою незмінною ревізією
 // (wp.create). Композитні специфікації та профілі модулів — поза межами v0.4.0.
 func (s *Store) CreateWorkProduct(ctx context.Context, actorID, projectID uuid.UUID, code, wpType, title, body string, metadata map[string]any) (WorkProduct, WorkProductRevision, error) {
+	if wpType == planType {
+		return WorkProduct{}, WorkProductRevision{}, ErrProjectPlanReserved
+	}
 	if !coreWorkProductTypes[wpType] {
 		return WorkProduct{}, WorkProductRevision{}, ErrInvalidWorkProductType
 	}
@@ -274,6 +278,18 @@ func (s *Store) recordProjectAudit(ctx context.Context, actorID, projectID uuid.
 		`INSERT INTO core.audit_events (actor_user_id, action, scope_type, scope_id, outcome, detail, correlation_id)
 		 VALUES ($1, $2, 'project', $3, 'success', $4, $5)`,
 		actorID, action, projectID, detail, correlationID)
+	if err != nil {
+		return fmt.Errorf("запис аудиторської події %s: %w", action, err)
+	}
+
+	return nil
+}
+
+func (s *Store) recordProjectAuditTx(ctx context.Context, tx pgx.Tx, actorID, projectID uuid.UUID, action string, detail map[string]any) error {
+	_, err := tx.Exec(ctx,
+		`INSERT INTO core.audit_events (actor_user_id, action, scope_type, scope_id, outcome, detail, correlation_id)
+		 VALUES ($1, $2, 'project', $3, 'success', $4, $5)`,
+		actorID, action, projectID, detail, uuid.New())
 	if err != nil {
 		return fmt.Errorf("запис аудиторської події %s: %w", action, err)
 	}

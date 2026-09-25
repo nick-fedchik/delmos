@@ -1,0 +1,26 @@
+{
+  "template_key": "generic-project-plan",
+  "template_version": 1,
+  "name": "Generic Project Plan",
+  "manifest": {
+    "objectives": [
+      {
+        "key": "OBJ-001",
+        "statement": "Deliver the project objective",
+        "success_criteria": []
+      }
+    ],
+    "scope_items": [],
+    "assumptions": [],
+    "constraints": [],
+    "responsibility_assignments": [],
+    "deliverables": [],
+    "phases": [],
+    "milestones": [],
+    "acceptance_rules": [],
+    "governance": {
+      "change_control_required": true
+    },
+    "extensions": {}
+  }
+}

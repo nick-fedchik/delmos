@@ -1,6 +1,7 @@
 package server
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -152,6 +153,10 @@ func handleCurrentSession() http.HandlerFunc {
 		if !ok {
 			writeJSONError(w, http.StatusUnauthorized, "unauthenticated", "сесія відсутня")
 			return
+		}
+
+		if secret, ok := r.Context().Value(csrfSecretKey).([]byte); ok && len(secret) > 0 {
+			w.Header().Set("X-CSRF-Token", base64.RawURLEncoding.EncodeToString(secret))
 		}
 
 		permissions := make([]string, 0, len(actor.Permissions))

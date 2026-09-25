@@ -23,6 +23,21 @@ func TestCreateWorkProductRejectsUnknownType(t *testing.T) {
 	}
 }
 
+func TestCreateWorkProductRejectsAdditionalProjectPlan(t *testing.T) {
+	ctx := context.Background()
+	store, authStore := newTestStore(t)
+	userID := newTestUser(t, authStore, "creator")
+	detail, err := store.CreateWithPlan(ctx, userID, "WP-PLAN-001", "Project", "")
+	if err != nil {
+		t.Fatalf("створення проєкту: %v", err)
+	}
+
+	_, _, err = store.CreateWorkProduct(ctx, userID, detail.Project.ID, "PLAN-002", "plan", "Other plan", "", nil)
+	if !errors.Is(err, project.ErrProjectPlanReserved) {
+		t.Errorf("очікувалася ErrProjectPlanReserved, отримано %v", err)
+	}
+}
+
 func TestCreateWorkProductAndRevise(t *testing.T) {
 	ctx := context.Background()
 	store, authStore := newTestStore(t)

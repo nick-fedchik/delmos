@@ -102,6 +102,38 @@ func TestCreateProjectCreatesPlanAtomically(t *testing.T) {
 	}
 }
 
+func TestPlanEndpointCreatesStructuredRevision(t *testing.T) {
+	handler, store := newProjectTestRouter(t)
+	cookie, csrfToken := loginAsProjectManager(t, handler, store)
+	createdProject := createTestProject(t, handler, cookie, csrfToken, "PLAN-H-001")
+
+	get := doJSON(t, handler, http.MethodGet, "/api/v1/projects/"+createdProject.ID+"/plan", nil, cookie, "")
+	if get.Code != http.StatusOK {
+		t.Fatalf("очікувався 200 для плану, отримано %d: %s", get.Code, get.Body.String())
+	}
+	var plan planDetailView
+	if err := json.Unmarshal(get.Body.Bytes(), &plan); err != nil {
+		t.Fatalf("розбір плану: %v", err)
+	}
+	if plan.TemplateKey != "generic-project-plan" || plan.TemplateVersion != 1 || plan.RevisionNumber != 1 {
+		t.Fatalf("очікувався generic-project-plan@1/r1, отримано %+v", plan)
+	}
+
+	plan.Manifest.Phases = []project.PlanPhase{{Key: "PH-001", Name: "Delivery", PlannedStart: "2026-10-01", PlannedFinish: "2026-10-31"}}
+	revise := doJSON(t, handler, http.MethodPost, "/api/v1/projects/"+createdProject.ID+"/plan/revisions",
+		map[string]any{"expected_row_version": plan.RowVersion, "body": "# Plan\n", "manifest": plan.Manifest}, cookie, csrfToken)
+	if revise.Code != http.StatusCreated {
+		t.Fatalf("очікувався 201 для ревізії плану, отримано %d: %s", revise.Code, revise.Body.String())
+	}
+	var revised planDetailView
+	if err := json.Unmarshal(revise.Body.Bytes(), &revised); err != nil {
+		t.Fatalf("розбір ревізії плану: %v", err)
+	}
+	if revised.RevisionNumber != 2 || revised.RowVersion != 2 {
+		t.Fatalf("очікувалися r2 та row_version=2, отримано %+v", revised)
+	}
+}
+
 func TestCreateProjectRejectsDuplicateCode(t *testing.T) {
 	handler, store := newProjectTestRouter(t)
 	cookie, csrfToken := loginAsProjectManager(t, handler, store)

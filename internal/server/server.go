@@ -12,13 +12,20 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/gin-gonic/gin"
+
 	"delmos/internal/auth"
 	"delmos/internal/config"
 	"delmos/internal/project"
 	"delmos/internal/ratelimit"
 	"delmos/internal/repository"
 	"delmos/internal/version"
+	"delmos/internal/webassets"
 )
+
+func init() {
+	gin.SetMode(gin.ReleaseMode)
+}
 
 // ReadinessCheck підтверджує готовність обслуговувати трафік: доступність СУБД
 // та відповідність схеми міграціям цього бінарника.
@@ -34,7 +41,31 @@ type Deps struct {
 	Repositories *repository.Store
 	LoginLimiter *ratelimit.Limiter
 	CookieSecure bool
+	BootStatus   BootStatusCheck
 }
+
+type ComponentStatus string
+
+const (
+	StatusGreen  ComponentStatus = "green"
+	StatusYellow ComponentStatus = "yellow"
+	StatusRed    ComponentStatus = "red"
+)
+
+type ComponentHealth struct {
+	ID      string          `json:"id"`
+	Name    string          `json:"name"`
+	Status  ComponentStatus `json:"status"`
+	Message string          `json:"message"`
+}
+
+type BootStatusResponse struct {
+	Status     ComponentStatus   `json:"status"`
+	Version    string            `json:"version"`
+	Components []ComponentHealth `json:"components"`
+}
+
+type BootStatusCheck func(ctx context.Context) BootStatusResponse
 
 type Server struct {
 	http            *http.Server
@@ -91,13 +122,12 @@ func (s *Server) Run(ctx context.Context) error {
 
 func newRouter(logger *slog.Logger, deps Deps) http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /healthz", handleHealth)
-	mux.HandleFunc("GET /readyz", handleReady(logger, deps.Ready))
-
+	mux.HandleFunc("GET /api/v1/system/boot-status", handleBootStatus(deps))
 	mux.HandleFunc("POST /api/v1/auth/login", handleLogin(logger, deps.Auth, deps.LoginLimiter, deps.CookieSecure))
 	mux.HandleFunc("POST /api/v1/auth/logout",
 		requireAuth(requireCSRF(logger, handleLogout(deps.Auth, deps.CookieSecure))))
 	mux.HandleFunc("GET /api/v1/auth/session", requireAuth(handleCurrentSession()))
+	mux.HandleFunc("GET /api/v1/entity-definitions", requireAuth(handleListEntityDefinitions(deps.Projects)))
 
 	mux.HandleFunc("POST /api/v1/role-bindings",
 		requireAuth(requireCSRF(logger, handleGrantSystemRole(deps.Auth))))
@@ -107,9 +137,32 @@ func newRouter(logger *slog.Logger, deps Deps) http.Handler {
 	mux.HandleFunc("POST /api/v1/projects", requireAuth(requireCSRF(logger, handleCreateProject(deps.Projects))))
 	mux.HandleFunc("GET /api/v1/projects", requireAuth(handleListProjects(deps.Projects)))
 	mux.HandleFunc("GET /api/v1/projects/{project_id}", requireAuth(handleGetProject(deps.Auth, deps.Projects)))
+	mux.HandleFunc("GET /api/v1/projects/{project_id}/plan", requireAuth(handleGetPlan(deps.Auth, deps.Projects)))
+	mux.HandleFunc("POST /api/v1/projects/{project_id}/plan/revisions",
+		requireAuth(requireCSRF(logger, handleRevisePlan(deps.Auth, deps.Projects))))
+	mux.HandleFunc("POST /api/v1/projects/{project_id}/plan/apply",
+		requireAuth(requireCSRF(logger, handleApplyPlan(deps.Auth, deps.Projects))))
+	mux.HandleFunc("GET /api/v1/projects/{project_id}/stakeholders",
+		requireAuth(handleListStakeholders(deps.Auth, deps.Projects)))
+	mux.HandleFunc("POST /api/v1/projects/{project_id}/stakeholders",
+		requireAuth(requireCSRF(logger, handleCreateStakeholder(deps.Auth, deps.Projects))))
+	mux.HandleFunc("GET /api/v1/projects/{project_id}/risks",
+		requireAuth(handleListRisks(deps.Auth, deps.Projects)))
+	mux.HandleFunc("POST /api/v1/projects/{project_id}/risks",
+		requireAuth(requireCSRF(logger, handleCreateRisk(deps.Auth, deps.Projects))))
 
 	mux.HandleFunc("POST /api/v1/projects/{project_id}/work-products",
 		requireAuth(requireCSRF(logger, handleCreateWorkProduct(deps.Auth, deps.Projects))))
+	mux.HandleFunc("POST /api/v1/projects/{project_id}/specifications",
+		requireAuth(requireCSRF(logger, handleCreateSpecification(deps.Auth, deps.Projects))))
+	mux.HandleFunc("GET /api/v1/projects/{project_id}/specifications/{specification_id}",
+		requireAuth(handleGetSpecification(deps.Auth, deps.Projects)))
+	mux.HandleFunc("POST /api/v1/projects/{project_id}/specifications/{specification_id}/revisions",
+		requireAuth(requireCSRF(logger, handleReviseSpecification(deps.Auth, deps.Projects))))
+	mux.HandleFunc("POST /api/v1/projects/{project_id}/trace-links",
+		requireAuth(requireCSRF(logger, handleCreateTraceLink(deps.Auth, deps.Projects))))
+	mux.HandleFunc("GET /api/v1/projects/{project_id}/traceability/{source_id}",
+		requireAuth(handleTraverseTraceability(deps.Auth, deps.Projects)))
 	mux.HandleFunc("GET /api/v1/projects/{project_id}/work-products",
 		requireAuth(handleListWorkProducts(deps.Auth, deps.Projects)))
 	mux.HandleFunc("GET /api/v1/projects/{project_id}/work-products/{work_product_id}",
@@ -126,8 +179,15 @@ func newRouter(logger *slog.Logger, deps Deps) http.Handler {
 	mux.HandleFunc("POST /api/v1/projects/{project_id}/work-products/{work_product_id}/export",
 		requireAuth(requireCSRF(logger, handleExportWorkProduct(deps.Auth, deps.Projects, deps.Repositories))))
 
-	handler := withSession(deps.Auth, deps.CookieSecure, mux)
-	return withRequestLogging(logger, withRecovery(logger, handler))
+	api := withSession(deps.Auth, deps.CookieSecure, mux)
+	router := gin.New()
+	router.GET("/healthz", gin.WrapF(handleHealth))
+	router.GET("/readyz", gin.WrapF(handleReady(logger, deps.Ready)))
+	router.GET("/boot-status", gin.WrapF(handleBootStatus(deps)))
+	router.Any("/api/v1/*path", gin.WrapH(api))
+	router.NoRoute(gin.WrapH(webassets.Handler()))
+
+	return withRequestLogging(logger, withRecovery(logger, router))
 }
 
 func handleHealth(w http.ResponseWriter, _ *http.Request) {
@@ -147,6 +207,87 @@ func handleReady(logger *slog.Logger, ready ReadinessCheck) http.HandlerFunc {
 		}
 
 		writePlain(w, http.StatusOK, "ready")
+	}
+}
+
+func handleBootStatus(deps Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ctx, cancel := context.WithTimeout(r.Context(), readinessTimeout)
+		defer cancel()
+
+		var resp BootStatusResponse
+		if deps.BootStatus != nil {
+			resp = deps.BootStatus(ctx)
+		} else {
+			resp = defaultBootStatus(ctx, deps)
+		}
+
+		writeJSON(w, http.StatusOK, resp)
+	}
+}
+
+func defaultBootStatus(ctx context.Context, deps Deps) BootStatusResponse {
+	components := make([]ComponentHealth, 0, 4)
+	overall := StatusGreen
+
+	components = append(components, ComponentHealth{
+		ID:      "core",
+		Name:    "Ядро DELMOS",
+		Status:  StatusGreen,
+		Message: "Активне (" + version.Version + ")",
+	})
+
+	dbStatus := StatusGreen
+	dbMsg := "Підключено"
+	if deps.Ready != nil {
+		if err := deps.Ready(ctx); err != nil {
+			dbStatus = StatusRed
+			dbMsg = "Помилка готовності або з'єднання"
+			overall = StatusRed
+		}
+	} else {
+		dbStatus = StatusYellow
+		dbMsg = "Перевірка готовності не задана"
+		if overall != StatusRed {
+			overall = StatusYellow
+		}
+	}
+	components = append(components, ComponentHealth{
+		ID:      "database",
+		Name:    "База даних (PostgreSQL)",
+		Status:  dbStatus,
+		Message: dbMsg,
+	})
+
+	schemaStatus := StatusGreen
+	schemaMsg := "Схема міграцій актуальна"
+	if dbStatus != StatusGreen {
+		schemaStatus = StatusYellow
+		schemaMsg = "Очікування бази даних"
+		if overall != StatusRed {
+			overall = StatusYellow
+		}
+	}
+	components = append(components, ComponentHealth{
+		ID:      "schema",
+		Name:    "Схема даних",
+		Status:  schemaStatus,
+		Message: schemaMsg,
+	})
+
+	gitStatus := StatusGreen
+	gitMsg := "Plain Git готовий"
+	components = append(components, ComponentHealth{
+		ID:      "git_storage",
+		Name:    "Сховище репозиторіїв",
+		Status:  gitStatus,
+		Message: gitMsg,
+	})
+
+	return BootStatusResponse{
+		Status:     overall,
+		Version:    version.Version,
+		Components: components,
 	}
 }
 

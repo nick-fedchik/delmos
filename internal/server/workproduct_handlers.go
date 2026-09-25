@@ -31,6 +31,7 @@ type retireWorkProductRequest struct {
 }
 
 type workProductRevisionView struct {
+	RevisionID     string         `json:"revision_id"`
 	RevisionNumber int            `json:"revision_number"`
 	Body           string         `json:"body"`
 	Metadata       map[string]any `json:"metadata"`
@@ -39,13 +40,14 @@ type workProductRevisionView struct {
 }
 
 type workProductView struct {
-	ID         string                  `json:"id"`
-	Code       string                  `json:"code"`
-	Type       string                  `json:"type"`
-	Title      string                  `json:"title"`
-	Status     string                  `json:"status"`
-	RowVersion int64                   `json:"row_version"`
-	Latest     workProductRevisionView `json:"latest_revision"`
+	ID          string                  `json:"id"`
+	Code        string                  `json:"code"`
+	Type        string                  `json:"type"`
+	Title       string                  `json:"title"`
+	Status      string                  `json:"status"`
+	RowVersion  int64                   `json:"row_version"`
+	Latest      workProductRevisionView `json:"latest_revision"`
+	Permissions []string                `json:"permissions,omitempty"`
 }
 
 type workProductSummaryView struct {
@@ -56,14 +58,24 @@ type workProductSummaryView struct {
 	Status string `json:"status"`
 }
 
-func toWorkProductView(wp project.WorkProduct, revision project.WorkProductRevision) workProductView {
+func toWorkProductView(wp project.WorkProduct, revision project.WorkProductRevision, permissions ...map[string]bool) workProductView {
+	var permKeys []string
+	if len(permissions) > 0 && permissions[0] != nil {
+		for k, v := range permissions[0] {
+			if v {
+				permKeys = append(permKeys, k)
+			}
+		}
+	}
 	return workProductView{
 		ID: wp.ID.String(), Code: wp.Code, Type: wp.Type, Title: wp.Title, Status: wp.Status, RowVersion: wp.RowVersion,
 		Latest: workProductRevisionView{
+			RevisionID:     revision.ID.String(),
 			RevisionNumber: revision.RevisionNumber, Body: revision.Body, Metadata: revision.Metadata,
 			PayloadHash: base64.RawURLEncoding.EncodeToString(revision.PayloadHash),
 			ContentHash: base64.RawURLEncoding.EncodeToString(revision.ContentHash),
 		},
+		Permissions: permKeys,
 	}
 }
 
@@ -110,6 +122,9 @@ func handleCreateWorkProduct(authSvc *auth.Service, projects *project.Store) htt
 
 		wp, revision, err := projects.CreateWorkProduct(r.Context(), actorID, projectID, req.Code, req.Type, req.Title, req.Body, req.Metadata)
 		switch {
+		case errors.Is(err, project.ErrProjectPlanReserved):
+			writeJSONError(w, http.StatusUnprocessableEntity, "project_plan_reserved", err.Error())
+			return
 		case errors.Is(err, project.ErrInvalidWorkProductType):
 			writeJSONError(w, http.StatusUnprocessableEntity, "invalid_type", err.Error())
 			return
@@ -152,7 +167,7 @@ func handleListWorkProducts(authSvc *auth.Service, projects *project.Store) http
 
 func handleGetWorkProduct(authSvc *auth.Service, projects *project.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		_, projectID, ok := projectScopePermission(w, r, authSvc, "wp.read")
+		actorID, projectID, ok := projectScopePermission(w, r, authSvc, "wp.read")
 		if !ok {
 			return
 		}
@@ -173,7 +188,8 @@ func handleGetWorkProduct(authSvc *auth.Service, projects *project.Store) http.H
 			return
 		}
 
-		writeJSON(w, http.StatusOK, toWorkProductView(detail.WorkProduct, detail.Latest))
+		permissions, _ := authSvc.ActiveProjectPermissions(r.Context(), actorID, projectID)
+		writeJSON(w, http.StatusOK, toWorkProductView(detail.WorkProduct, detail.Latest, permissions))
 	}
 }
 
@@ -213,6 +229,7 @@ func handleReviseWorkProduct(authSvc *auth.Service, projects *project.Store) htt
 		}
 
 		writeJSON(w, http.StatusCreated, workProductRevisionView{
+			RevisionID:     revision.ID.String(),
 			RevisionNumber: revision.RevisionNumber, Body: revision.Body, Metadata: revision.Metadata,
 			PayloadHash: base64.RawURLEncoding.EncodeToString(revision.PayloadHash),
 			ContentHash: base64.RawURLEncoding.EncodeToString(revision.ContentHash),

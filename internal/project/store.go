@@ -125,12 +125,14 @@ func (s *Store) CreateWithPlan(ctx context.Context, actorID uuid.UUID, code, nam
 		return ProjectDetail{}, fmt.Errorf("створення PLAN-001: %w", err)
 	}
 
+	manifest := DefaultGenericPlanManifest(name)
 	metadata := map[string]any{
 		"plan_schema_version": "1.0.0",
-		"name":                name,
+		"template_key":        genericPlanTemplateKey,
+		"template_version":    genericPlanTemplateVersion,
 	}
 	body := "# " + planTitle + "\n\n" + name + "\n"
-	payloadHash, contentHash := canonicalHashes(planWorkProductCode, planType, planProfile, planTitle, body, metadata)
+	payloadHash, contentHash := canonicalPlanHashes(planWorkProductCode, planType, planProfile, planTitle, body, metadata, manifest)
 
 	var revisionID uuid.UUID
 	err = tx.QueryRow(ctx,
@@ -141,6 +143,14 @@ func (s *Store) CreateWithPlan(ctx context.Context, actorID uuid.UUID, code, nam
 	).Scan(&revisionID)
 	if err != nil {
 		return ProjectDetail{}, fmt.Errorf("створення першої ревізії PLAN-001: %w", err)
+	}
+
+	_, err = tx.Exec(ctx,
+		`INSERT INTO core.project_plan_manifests (revision_id, template_key, template_version, manifest, manifest_hash)
+		 VALUES ($1, $2, $3, $4, $5)`,
+		revisionID, genericPlanTemplateKey, genericPlanTemplateVersion, manifest, canonicalManifestHash(manifest))
+	if err != nil {
+		return ProjectDetail{}, fmt.Errorf("створення маніфесту PLAN-001: %w", err)
 	}
 
 	_, err = tx.Exec(ctx,
