@@ -18,6 +18,7 @@ import (
 	"delmos/internal/config"
 	"delmos/internal/logging"
 	"delmos/internal/migrate"
+	"delmos/internal/pidfile"
 	"delmos/internal/project"
 	"delmos/internal/ratelimit"
 	"delmos/internal/repository"
@@ -39,6 +40,7 @@ func run() error {
 	migrateOnly := flag.Bool("migrate-only", false, "застосувати міграції схеми і завершити роботу")
 	bootstrapAdmin := flag.String("bootstrap-admin", "",
 		"створити System Administrator з цим логіном і завершити роботу (пароль з DELMOS_BOOTSTRAP_PASSWORD)")
+	pidFilePath := flag.String("pid-file", "", "шлях до pid-файлу (перевизначає server.pid_file з конфігурації)")
 	flag.Parse()
 
 	if *showVersion {
@@ -51,8 +53,26 @@ func run() error {
 		return err
 	}
 
+	effectivePIDFile := cfg.Server.PIDFile
+	if *pidFilePath != "" {
+		effectivePIDFile = *pidFilePath
+	}
+
 	logger := logging.New(cfg.Logging.Level, cfg.Logging.Format, os.Stdout)
-	logger.Info("старт DELMOS", "version", version.Version, "commit", version.Commit, "database", cfg.Database)
+	logger.Info("старт DELMOS", "version", version.Version, "commit", version.Commit,
+		"pid", os.Getpid(), "pid_file", effectivePIDFile, "database", cfg.Database)
+
+	if effectivePIDFile != "" {
+		pf, err := pidfile.Write(effectivePIDFile)
+		if err != nil {
+			return err
+		}
+		defer func() {
+			if rErr := pf.Remove(); rErr != nil {
+				logger.Warn("не вдалося видалити pid-файл", "path", effectivePIDFile, "error", rErr)
+			}
+		}()
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -84,6 +104,65 @@ func run() error {
 		return migrate.Verify(ctx, pool)
 	}
 
+	bootCheck := func(ctx context.Context) server.BootStatusResponse {
+		components := make([]server.ComponentHealth, 0, 4)
+		overall := server.StatusGreen
+
+		components = append(components, server.ComponentHealth{
+			ID:      "core",
+			Name:    "Ядро DELMOS",
+			Status:  server.StatusGreen,
+			Message: "Активне (" + version.Version + ")",
+		})
+
+		dbStatus := server.StatusGreen
+		dbMsg := "Підключено"
+		if err := pool.Ping(ctx); err != nil {
+			dbStatus = server.StatusRed
+			dbMsg = "Помилка з'єднання з PostgreSQL"
+			overall = server.StatusRed
+		}
+		components = append(components, server.ComponentHealth{
+			ID:      "database",
+			Name:    "База даних (PostgreSQL)",
+			Status:  dbStatus,
+			Message: dbMsg,
+		})
+
+		schemaStatus := server.StatusGreen
+		schemaMsg := "Схема міграцій актуальна"
+		if dbStatus != server.StatusGreen {
+			schemaStatus = server.StatusYellow
+			schemaMsg = "Очікування бази даних"
+			if overall != server.StatusRed {
+				overall = server.StatusYellow
+			}
+		} else if err := migrate.Verify(ctx, pool); err != nil {
+			schemaStatus = server.StatusRed
+			schemaMsg = "Помилка перевірки схеми"
+			overall = server.StatusRed
+		}
+		components = append(components, server.ComponentHealth{
+			ID:      "schema",
+			Name:    "Схема даних",
+			Status:  schemaStatus,
+			Message: schemaMsg,
+		})
+
+		components = append(components, server.ComponentHealth{
+			ID:      "git_storage",
+			Name:    "Сховище репозиторіїв",
+			Status:  server.StatusGreen,
+			Message: "Plain Git готовий",
+		})
+
+		return server.BootStatusResponse{
+			Status:     overall,
+			Version:    version.Version,
+			Components: components,
+		}
+	}
+
 	deps := server.Deps{
 		Ready:        ready,
 		Auth:         auth.NewService(authStore),
@@ -91,6 +170,7 @@ func run() error {
 		Repositories: repository.NewStore(pool, repository.NewPlainGitProvider()),
 		LoginLimiter: ratelimit.New(rate.Every(3*time.Second), 5), // 5 спроб одразу, далі 1 на 3 секунди на IP
 		CookieSecure: cfg.Server.CookieSecure,
+		BootStatus:   bootCheck,
 	}
 
 	return server.New(cfg.Server, logger, deps).Run(ctx)

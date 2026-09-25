@@ -19,7 +19,7 @@ func writeConfig(t *testing.T, content string) string {
 }
 
 func TestLoadAppliesDefaults(t *testing.T) {
-	cfg, err := Load(writeConfig(t, "server:\n  address: \"127.0.0.1:10020\"\n"))
+	cfg, err := Load(writeConfig(t, "server:\n  address: \"127.0.0.1:10120\"\n"))
 	if err != nil {
 		t.Fatalf("неочікувана помилка: %v", err)
 	}
@@ -65,14 +65,18 @@ func TestLoadRejectsInvalidValues(t *testing.T) {
 func TestEnvOverridesFile(t *testing.T) {
 	t.Setenv("DELMOS_DB_NAME", "delmos_env")
 	t.Setenv("DELMOS_DB_PORT", "6432")
+	t.Setenv("DELMOS_PID_FILE", "/tmp/delmos.pid")
 
-	cfg, err := Load(writeConfig(t, "database:\n  name: delmos_file\n  port: 5432\n"))
+	cfg, err := Load(writeConfig(t, "server:\n  pid_file: \"/var/run/delmos.pid\"\ndatabase:\n  name: delmos_file\n  port: 5432\n"))
 	if err != nil {
 		t.Fatalf("неочікувана помилка: %v", err)
 	}
 
 	if cfg.Database.Name != "delmos_env" || cfg.Database.Port != 6432 {
 		t.Errorf("змінні середовища мають переважати над файлом: %+v", cfg.Database)
+	}
+	if cfg.Server.PIDFile != "/tmp/delmos.pid" {
+		t.Errorf("DELMOS_PID_FILE має переважати над файлом, отримано %q", cfg.Server.PIDFile)
 	}
 }
 

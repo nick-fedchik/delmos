@@ -30,7 +30,7 @@ flowchart TD
     Q1 -->|Ні| CheckLogs["journalctl -u delmos -n 100"]
     Q1 -->|Так| Q2{"/healthz повертає 200?"}
     CheckLogs --> FixConfig["Перевірити delmos.yaml та delmos.env"]
-    Q2 -->|Ні| Q3{"Порт 10020 зайнятий іншим процесом?"}
+    Q2 -->|Ні| Q3{"Порт 10120 зайнятий іншим процесом?"}
     Q2 -->|Так| Q4{"/readyz повертає 200?"}
     Q3 -->|Так| KillPort["Звільнити порт або змінити конфігурацію"]
     Q4 -->|Ні| CheckDB["Перевірити доступність PostgreSQL: pg_isready"]

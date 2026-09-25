@@ -33,6 +33,10 @@ go.work.sum
 
 # DELMOS
 bin/
+*.pid
+*.log
+internal/webassets/dist/*
+!internal/webassets/dist/.gitkeep
 *.env
 delmos.local.yaml
 *.dump

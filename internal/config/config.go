@@ -36,7 +36,8 @@ type Server struct {
 	ShutdownTimeout Duration `yaml:"shutdown_timeout"`
 	// CookieSecure ввімкає прапорець Secure і префікс __Host- у сесійних cookie.
 	// Вимкнений лише для локальної розробки без TLS (ARCHITECTURE.md: Secure під HTTPS).
-	CookieSecure bool `yaml:"cookie_secure"`
+	CookieSecure bool   `yaml:"cookie_secure"`
+	PIDFile      string `yaml:"pid_file"`
 }
 
 type Database struct {
@@ -60,7 +61,7 @@ type Logging struct {
 func defaults() Config {
 	return Config{
 		Server: Server{
-			Address:         "127.0.0.1:10020",
+			Address:         "127.0.0.1:10120",
 			ReadTimeout:     Duration(10 * time.Second),
 			WriteTimeout:    Duration(30 * time.Second),
 			IdleTimeout:     Duration(60 * time.Second),
@@ -117,6 +118,7 @@ func Load(path string) (Config, error) {
 func (c *Config) applyEnv() error {
 	stringEnv := map[string]*string{
 		"DELMOS_SERVER_ADDRESS":       &c.Server.Address,
+		"DELMOS_PID_FILE":             &c.Server.PIDFile,
 		"DELMOS_DB_HOST":              &c.Database.Host,
 		"DELMOS_DB_NAME":              &c.Database.Name,
 		"DELMOS_DB_USER":              &c.Database.User,

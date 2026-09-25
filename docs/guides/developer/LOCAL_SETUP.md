@@ -63,13 +63,22 @@ go test -race ./...     # повний набір: і юніт-, і (за ная
 ## 4. Запуск локального сервера
 
 ```bash
-make build
-make migrate                                 # застосувати міграції схеми
+make migrate                                      # застосувати міграції схеми
 DELMOS_BOOTSTRAP_PASSWORD='<локальний-пароль>' ./bin/delmos -config ./configs/delmos.yaml -bootstrap-admin admin
-./bin/delmos -config ./configs/delmos.yaml    # або: make run
+make dev                                          # локальний сервер у терміналі (PID-файл bin/delmos.pid)
+# або фоновий запуск та перезапуск:
+make start                                        # запуск у фоні з записом bin/delmos.pid
+make status                                       # перевірка стану за PID-файлом та /boot-status
+make stop                                         # зупинка процесу за PID-файлом
+make restart                                      # перезапуск (stop + start)
 ```
 
-Для локальної розробки без TLS-термінації додайте у `configs/delmos.yaml`:
+`make dev` і `make start` автоматично записують PID-файл у `bin/delmos.pid` і встановлюють
+`DELMOS_COOKIE_SECURE=false` лише для свого процесу, тому
+HttpOnly-сесії працюють через `http://127.0.0.1`. Ця змінна не змінює
+`configs/delmos.yaml` і не впливає на `delmos.service`.
+
+Щоб вручну запустити binary без TLS-термінації, встановіть:
 
 ```yaml
 server:
@@ -78,13 +87,15 @@ server:
 
 або встановіть `DELMOS_COOKIE_SECURE=false` в оточенні процесу.
 
-## 5. Фронтенд (Vue 3 / Vite)
+## 5. Web GUI
 
 ```bash
-cd web
-npm install
-npm run dev     # http://localhost:5173, /api проксіюється на 127.0.0.1:10020 (vite.config.ts)
+make dev         # http://127.0.0.1:10120, Vue SPA та API в одному binary
 ```
+
+`make build` збирає Vue SPA та вбудовує її у `delmos`. Vite використовується лише
+як інструмент складання і не є runtime-процесом. `make dev` не встановлює binary
+у `/usr/local` і не використовує `systemctl`.
 
 Мінімальний UI (`v0.6.0`) без дизайн-системи Pajamas — вхід, список/створення проєктів, перегляд плану, CRUD базового Work Product, прив'язка Git-сховища та експорт. Повна дизайн-система та вбудовування активів у Go-бінарник — наступні ітерації.
 
