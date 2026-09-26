@@ -149,6 +149,12 @@ func newRouter(logger *slog.Logger, deps Deps) http.Handler {
 		requireAuth(requireCSRF(logger, handleTransitionPhase(deps.Auth, deps.Projects))))
 	mux.HandleFunc("POST /api/v1/projects/{project_id}/work-products/{work_product_id}/submit",
 		requireAuth(requireCSRF(logger, handleSubmitWorkProduct(deps.Auth, deps.Projects))))
+	mux.HandleFunc("POST /api/v1/projects/{project_id}/work-products/{work_product_id}/reviews",
+		requireAuth(requireCSRF(logger, handleReviewDecision(deps.Auth, deps.Projects, project.DecisionReview, "wp.review"))))
+	mux.HandleFunc("POST /api/v1/projects/{project_id}/work-products/{work_product_id}/approvals",
+		requireAuth(requireCSRF(logger, handleReviewDecision(deps.Auth, deps.Projects, project.DecisionApproval, "wp.approve"))))
+	mux.HandleFunc("POST /api/v1/projects/{project_id}/work-products/{work_product_id}/request-changes",
+		requireAuth(requireCSRF(logger, handleReviewDecision(deps.Auth, deps.Projects, project.DecisionRequestChanges, "wp.request_changes"))))
 	mux.HandleFunc("POST /api/v1/projects/{project_id}/plan/revisions",
 		requireAuth(requireCSRF(logger, handleRevisePlan(deps.Auth, deps.Projects))))
 	mux.HandleFunc("POST /api/v1/projects/{project_id}/plan/apply",

@@ -69,3 +69,58 @@ func handleSubmitWorkProduct(authSvc *auth.Service, projects *project.Store) htt
 		}
 	}
 }
+
+type decisionRequest struct {
+	Reason       string `json:"reason"`
+	OperationKey string `json:"operation_key"`
+}
+
+// handleReviewDecision обслуговує review / approval / request_changes.
+//
+// Право перевіряється на HTTP-шарі, призначення, SoD і кворум — атомарно в
+// транзакції сховища (ADR-009 §4). Повтор із тим самим operation_key
+// повертає попередній результат, а не другий підпис.
+func handleReviewDecision(authSvc *auth.Service, projects *project.Store, kind, permission string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		actor, projectID, ok := projectScopePermission(w, r, authSvc, permission)
+		if !ok {
+			return
+		}
+		workProductID, err := uuid.Parse(r.PathValue("work_product_id"))
+		if err != nil {
+			writeJSONError(w, http.StatusBadRequest, "invalid_work_product_id", "некоректний ідентифікатор артефакту")
+			return
+		}
+
+		var req decisionRequest
+		// Тіло необов'язкове для review та approval.
+		if r.Body != nil {
+			_ = json.NewDecoder(r.Body).Decode(&req)
+		}
+
+		decision, err := projects.RecordDecision(r.Context(), actor, projectID, workProductID,
+			kind, req.Reason, req.OperationKey)
+		switch {
+		case err == nil:
+			writeJSON(w, http.StatusCreated, decision)
+		case errors.Is(err, project.ErrWorkProductNotFound):
+			writeJSONError(w, http.StatusNotFound, "work_product_not_found", "артефакт не знайдено")
+		case errors.Is(err, project.ErrNotAssigned):
+			writeJSONError(w, http.StatusForbidden, "not_assigned", err.Error())
+		case errors.Is(err, project.ErrSelfDecision):
+			writeJSONError(w, http.StatusUnprocessableEntity, "self_decision", err.Error())
+		case errors.Is(err, project.ErrStaleRevision):
+			writeJSONError(w, http.StatusConflict, "stale_revision", err.Error())
+		case errors.Is(err, project.ErrNotInReview):
+			writeJSONError(w, http.StatusUnprocessableEntity, "not_in_review", err.Error())
+		case errors.Is(err, project.ErrReviewRequestMissing):
+			writeJSONError(w, http.StatusUnprocessableEntity, "no_open_request", err.Error())
+		case errors.Is(err, project.ErrNoPositiveReview):
+			writeJSONError(w, http.StatusUnprocessableEntity, "no_positive_review", err.Error())
+		case errors.Is(err, project.ErrReasonRequired):
+			writeJSONError(w, http.StatusUnprocessableEntity, "reason_required", err.Error())
+		default:
+			writeJSONError(w, http.StatusInternalServerError, "internal_error", "не вдалося зафіксувати рішення")
+		}
+	}
+}

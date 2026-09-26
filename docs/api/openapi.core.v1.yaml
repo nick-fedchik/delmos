@@ -670,7 +670,84 @@ paths:
         '404': { description: Work product not found }
         '409': { description: An open review request already exists }
         '422': { description: Not a draft, no revision, or assignee is the author }
+  /projects/{project_id}/work-products/{work_product_id}/reviews:
+    post:
+      operationId: reviewWorkProduct
+      summary: Record an independent review decision (ADR-009 §2)
+      x-required-permission: wp.review
+      description: >-
+        Records an immutable review record. It deliberately does NOT move the
+        work product to approved: a positive review is a precondition for
+        approval, not approval itself. The decider must be assigned as reviewer
+        on the open request and must not be the author of the revision.
+      parameters: [{ $ref: '#/components/parameters/ProjectId' }, { $ref: '#/components/parameters/WorkProductId' }]
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DecisionInput' }
+      responses:
+        '201': { description: Decision recorded, content: { application/json: { schema: { $ref: '#/components/schemas/ReviewDecision' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { description: No permission, or not assigned as reviewer }
+        '409': { description: Revision changed after the request was created }
+        '422': { description: Not in review, or the decider is the author }
+  /projects/{project_id}/work-products/{work_product_id}/approvals:
+    post:
+      operationId: approveWorkProduct
+      summary: Record an approval decision (ADR-009 §2)
+      x-required-permission: wp.approve
+      description: >-
+        Requires a prior positive review by a person independent of the author.
+        The same person may both review and approve only when holding both
+        separate permissions and both assignments. On success the request is
+        closed and the work product becomes approved.
+      parameters: [{ $ref: '#/components/parameters/ProjectId' }, { $ref: '#/components/parameters/WorkProductId' }]
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DecisionInput' }
+      responses:
+        '201': { description: Decision recorded, content: { application/json: { schema: { $ref: '#/components/schemas/ReviewDecision' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { description: No permission, or not assigned as approver }
+        '409': { description: Revision changed after the request was created }
+        '422': { description: No positive review yet, or the decider is the author }
+  /projects/{project_id}/work-products/{work_product_id}/request-changes:
+    post:
+      operationId: requestChangesOnWorkProduct
+      summary: Return the work product to draft with a reason (ADR-009 §3)
+      x-required-permission: wp.request_changes
+      description: >-
+        Available to a reviewer or an approver. This is a "changes needed"
+        conclusion, not a separate rejected state. A reason is mandatory.
+      parameters: [{ $ref: '#/components/parameters/ProjectId' }, { $ref: '#/components/parameters/WorkProductId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/DecisionInput'
+                - required: [reason]
+      responses:
+        '201': { description: Decision recorded, content: { application/json: { schema: { $ref: '#/components/schemas/ReviewDecision' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { description: No permission, or not assigned }
+        '422': { description: Reason missing, or not in review }
 components:
+  parameters:
+    ProjectId:
+      name: project_id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    WorkProductId:
+      name: work_product_id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
   securitySchemes:
     sessionCookie:
       type: apiKey
@@ -896,6 +973,32 @@ components:
         delivery_attempts: { type: integer }
         last_error: { type: string }
         created_at: { type: string, format: date-time }
+    DecisionInput:
+      type: object
+      properties:
+        reason:
+          type: string
+          description: Mandatory for request-changes; ignored otherwise.
+        operation_key:
+          type: string
+          description: >-
+            Idempotency key. Repeating a call with the same key returns the
+            previous decision instead of adding a second signature to the quorum.
+    ReviewDecision:
+      type: object
+      required: [id, review_request_id, revision_id, decision_kind, outcome, decided_by, decided_at, work_product_status]
+      properties:
+        id: { type: string, format: uuid }
+        review_request_id: { type: string, format: uuid }
+        revision_id: { type: string, format: uuid }
+        decision_kind: { type: string, enum: [review, approval, request_changes] }
+        outcome: { type: string, enum: [positive, changes_requested] }
+        decided_by: { type: string, format: uuid }
+        reason: { type: string }
+        decided_at: { type: string, format: date-time }
+        work_product_status:
+          type: string
+          description: Status after the decision. A positive review leaves it in_review.
     ReviewRequest:
       type: object
       required: [id, project_id, work_product_id, revision_id, status, requested_by, created_at]
