@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"delmos/internal/economics"
+	"delmos/internal/metrics"
 	"delmos/internal/migrate"
 	"delmos/internal/project"
 	"delmos/internal/testsupport"
@@ -121,6 +122,24 @@ func (f *phaseFixture) spend(t *testing.T, amount string) {
 	}
 }
 
+// collectMetrics виконує те, що в роботі робить фоновий обробник події
+// economics.inputs_changed: перераховує показники і фіксує вимірювання.
+func (f *phaseFixture) collectMetrics(t *testing.T, asOf time.Time) {
+	t.Helper()
+	ctx := context.Background()
+	tx, err := f.pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("відкриття транзакції: %v", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err := metrics.NewCollector(f.econ).CollectEconomics(ctx, tx, f.projectID, uuid.New(), asOf); err != nil {
+		t.Fatalf("збирання метрик: %v", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatalf("фіксація вимірювань: %v", err)
+	}
+}
+
 func (f *phaseFixture) status(t *testing.T) string {
 	t.Helper()
 	var status string
@@ -161,6 +180,7 @@ func TestPhaseClosesWhenWithinFundingLimit(t *testing.T) {
 	f.approvedBaseline(t)
 	f.activate(t)
 	f.spend(t, "9000.00") // ліміт 12000
+	f.collectMetrics(t, gateAsOf)
 
 	if _, err := f.projects.TransitionPhase(context.Background(),
 		f.actor, f.projectID, gatePhase, "completed", gateAsOf); err != nil {
@@ -177,6 +197,7 @@ func TestPhaseClosesExactlyAtFundingLimit(t *testing.T) {
 	f.approvedBaseline(t)
 	f.activate(t)
 	f.spend(t, gateLimit)
+	f.collectMetrics(t, gateAsOf)
 
 	if _, err := f.projects.TransitionPhase(context.Background(),
 		f.actor, f.projectID, gatePhase, "completed", gateAsOf); err != nil {
@@ -196,6 +217,60 @@ func TestPhaseClosesWithoutApprovedBaseline(t *testing.T) {
 	if _, err := f.projects.TransitionPhase(context.Background(),
 		f.actor, f.projectID, gatePhase, "completed", gateAsOf); err != nil {
 		t.Fatalf("без кошторису перехід має проходити: %v", err)
+	}
+}
+
+// SWR-22.3: під економічним контролем шлюз не відкривається, доки метрики не
+// пораховано. Витрати тут у межах ліміту — отже блокує саме брак вимірювань,
+// а не перевищення бюджету.
+func TestGateBlockedWhenMetricsNeverComputed(t *testing.T) {
+	f := newPhaseFixture(t)
+	f.approvedBaseline(t)
+	f.activate(t)
+	f.spend(t, "9000.00")
+
+	_, err := f.projects.TransitionPhase(context.Background(),
+		f.actor, f.projectID, gatePhase, "completed", gateAsOf)
+	if err == nil {
+		t.Fatal("очікувалось вето: обов'язкові метрики не обчислено")
+	}
+	if !errors.Is(err, project.ErrPhaseGateRejected) {
+		t.Fatalf("очікувано ErrPhaseGateRejected, отримано %v", err)
+	}
+	if got := f.status(t); got != "active" {
+		t.Errorf("статус фази = %q, очікувано active", got)
+	}
+}
+
+// SWR-22.3: вимірювання, що пережило поріг застарівання, не рятує шлюз.
+// Інакше одноразовий розрахунок відкривав би шлюз назавжди.
+func TestGateBlockedByStaleMetrics(t *testing.T) {
+	f := newPhaseFixture(t)
+	f.approvedBaseline(t)
+	f.activate(t)
+	f.spend(t, "9000.00")
+	f.collectMetrics(t, gateAsOf)
+
+	// Поріг усіх економічних метрик — доба; беремо запас у двоє.
+	staleAsOf := gateAsOf.Add(48 * time.Hour)
+	_, err := f.projects.TransitionPhase(context.Background(),
+		f.actor, f.projectID, gatePhase, "completed", staleAsOf)
+	if err == nil {
+		t.Fatal("очікувалось вето: вимірювання застаріли")
+	}
+	if !errors.Is(err, project.ErrPhaseGateRejected) {
+		t.Fatalf("очікувано ErrPhaseGateRejected, отримано %v", err)
+	}
+
+	// Перерахунок на актуальну дату знімає блокування — доводить, що
+	// блокувала саме свіжість, а не щось інше.
+	f.collectMetrics(t, staleAsOf)
+	if _, err := f.projects.TransitionPhase(context.Background(),
+		f.actor, f.projectID, gatePhase, "completed", staleAsOf); err != nil {
+		t.Fatalf("після перерахунку перехід має проходити: %v", err)
+	}
+	if got := f.status(t); got != "completed" {
+		t.Errorf("статус фази = %q, очікувано completed", got)
 	}
 }
 
@@ -243,6 +318,7 @@ func TestCostVarianceAlertWarnsButDoesNotBlock(t *testing.T) {
 	f.activate(t)
 	// Витрати є, затверджених результатів немає => EV = 0 => CPI = 0 < 0.85.
 	f.spend(t, "1000.00")
+	f.collectMetrics(t, gateAsOf)
 
 	if _, err := f.projects.TransitionPhase(context.Background(),
 		f.actor, f.projectID, gatePhase, "completed", gateAsOf); err != nil {

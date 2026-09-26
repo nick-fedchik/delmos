@@ -22,6 +22,7 @@ import (
 	"delmos/internal/config"
 	"delmos/internal/economics"
 	"delmos/internal/logging"
+	"delmos/internal/metrics"
 	"delmos/internal/migrate"
 	"delmos/internal/pidfile"
 	"delmos/internal/project"
@@ -121,6 +122,20 @@ func run() error {
 			}
 			return projects.ApplyRevisionCommittedEffects(ctx, tx, workProductID, revisionID)
 		})
+
+	// Показники обчислюються у фоновому обробнику, а не на шляху запиту
+	// (SWR-22.1). Шлюз завершення фази спирається саме на ці вимірювання, тож без
+	// цієї реєстрації економічно контрольовані фази не закривалися б узагалі.
+	economicsStore := economics.New(pool)
+	metricsStore := metrics.New(pool)
+	collector := metrics.NewCollector(economicsStore)
+	automationEngine.RegisterHandler("trigger.core.after_economics_changed",
+		func(ctx context.Context, tx pgx.Tx, env automation.Envelope) error {
+			if env.ScopeID == nil {
+				return fmt.Errorf("подія %s без ідентифікатора проєкту", env.EventKey)
+			}
+			return collector.HandleEvent(ctx, tx, *env.ScopeID, env.CorrelationID)
+		})
 	go automationEngine.Run(ctx, time.Duration(cfg.Automation.PollInterval))
 
 	ready := func(ctx context.Context) error {
@@ -195,7 +210,8 @@ func run() error {
 		Projects:     projects,
 		Repositories: repository.NewStore(pool, repository.NewPlainGitProvider()),
 		Automation:   automationEngine,
-		Economics:    economics.New(pool),
+		Economics:    economicsStore,
+		Metrics:      metricsStore,
 		LoginLimiter: ratelimit.New(rate.Every(3*time.Second), 5), // 5 спроб одразу, далі 1 на 3 секунди на IP
 		CookieSecure: cfg.Server.CookieSecure,
 		BootStatus:   bootCheck,

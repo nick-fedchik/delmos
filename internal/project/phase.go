@@ -11,6 +11,7 @@ import (
 
 	"delmos/internal/automation"
 	"delmos/internal/economics"
+	"delmos/internal/metrics"
 )
 
 var (
@@ -71,6 +72,15 @@ func (s *Store) TransitionPhase(ctx context.Context, actorID, projectID uuid.UUI
 		return PhaseTransitionResult{}, err
 	}
 	facts[economics.FieldTargetStatus] = targetStatus
+
+	// Якість метрик перевіряється в тій самій транзакції: інакше між
+	// перевіркою свіжості та зміною статусу могло б з'явитися нове
+	// вимірювання (SWR-22.3).
+	blockers, err := metrics.GateBlockers(ctx, tx, projectID, phaseKey, asOf)
+	if err != nil {
+		return PhaseTransitionResult{}, err
+	}
+	facts[automation.FieldMetricBlockers] = blockers
 
 	evalCtx := automation.EvalContext{Fields: facts, Permissions: map[string]bool{}}
 	correlationID := uuid.New()

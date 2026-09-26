@@ -202,7 +202,7 @@ func TestEarnedValueCountsOnlyApprovedDeliverables(t *testing.T) {
 	approved := f.createWorkProduct(t, "REQ-1", "approved")
 	draft := f.createWorkProduct(t, "REQ-2", "draft")
 	for _, wp := range []uuid.UUID{approved, draft} {
-		if err := f.store.LinkPhaseDeliverable(ctx, f.project, wp, "design", "1.000"); err != nil {
+		if err := f.store.LinkPhaseDeliverable(ctx, f.project, wp, f.author, "design", "1.000"); err != nil {
 			t.Fatalf("привʼязка результату: %v", err)
 		}
 	}

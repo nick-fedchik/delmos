@@ -13,6 +13,7 @@ import (
 
 	"delmos/internal/auth"
 	"delmos/internal/economics"
+	"delmos/internal/metrics"
 	"delmos/internal/migrate"
 	"delmos/internal/project"
 	"delmos/internal/ratelimit"
@@ -42,6 +43,7 @@ func newEconomicsTestRouter(t *testing.T) (http.Handler, *auth.Store, *pgxpool.P
 		Auth:         auth.NewService(authStore),
 		Projects:     project.NewStore(pool),
 		Economics:    economics.New(pool),
+		Metrics:      metrics.New(pool),
 		LoginLimiter: ratelimit.New(rate.Every(time.Millisecond), 1000),
 		CookieSecure: true,
 	}

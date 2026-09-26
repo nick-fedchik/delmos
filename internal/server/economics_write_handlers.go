@@ -217,7 +217,7 @@ type phaseDeliverableRequest struct {
 // коефіцієнтом. Без цього звʼязку здобута цінність фази не обчислюється.
 func handleLinkPhaseDeliverable(authSvc *auth.Service, store *economics.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		_, projectID, ok := projectScopePermission(w, r, authSvc, "economics.manage")
+		actorID, projectID, ok := projectScopePermission(w, r, authSvc, "economics.manage")
 		if !ok {
 			return
 		}
@@ -230,7 +230,7 @@ func handleLinkPhaseDeliverable(authSvc *auth.Service, store *economics.Store) h
 		if weight == "" {
 			weight = "1.000"
 		}
-		if err := store.LinkPhaseDeliverable(r.Context(), projectID, req.WorkProductID, req.PhaseKey, weight); err != nil {
+		if err := store.LinkPhaseDeliverable(r.Context(), projectID, req.WorkProductID, actorID, req.PhaseKey, weight); err != nil {
 			writeJSONError(w, http.StatusUnprocessableEntity, "invalid_deliverable_link", err.Error())
 			return
 		}

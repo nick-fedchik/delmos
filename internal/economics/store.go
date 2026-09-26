@@ -9,6 +9,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+
+	"delmos/internal/automation"
 )
 
 var (
@@ -35,12 +37,26 @@ type WorkRecord struct {
 	CreatedAt     time.Time  `json:"created_at"`
 }
 
+// emitInputsChanged сповіщає про зміну вхідних даних здобутої цінності.
+// Подія записується в тій самій транзакції, що й сама зміна: інакше збій
+// після фіксації запису лишив би показники назавжди розбіжними з даними.
+func emitInputsChanged(ctx context.Context, tx pgx.Tx, projectID, actorID uuid.UUID, reason string) error {
+	return automation.EmitEvent(ctx, tx, "economics.inputs_changed", &projectID, &actorID, uuid.New(),
+		map[string]any{"reason": reason})
+}
+
 // LogWorkRecord фіксує відпрацьовані години. Списання дозволене лише у фазі
 // зі статусом active (SWR-39.1): завершена фаза вже врахована в показниках,
 // і дозапис до неї заднім числом змінив би вже подані звіти.
 func (s *Store) LogWorkRecord(ctx context.Context, rec WorkRecord) (WorkRecord, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return WorkRecord{}, fmt.Errorf("відкриття транзакції трудовитрат: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
 	var phaseStatus string
-	err := s.pool.QueryRow(ctx,
+	err = tx.QueryRow(ctx,
 		`SELECT status FROM core.project_phases WHERE project_id = $1 AND phase_key = $2`,
 		rec.ProjectID, rec.PhaseKey).Scan(&phaseStatus)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -54,7 +70,7 @@ func (s *Store) LogWorkRecord(ctx context.Context, rec WorkRecord) (WorkRecord, 
 	}
 
 	var out WorkRecord
-	err = s.pool.QueryRow(ctx,
+	err = tx.QueryRow(ctx,
 		`INSERT INTO core.work_records
 		   (project_id, user_id, work_product_id, phase_key, role_key,
 		    work_date, duration_hours, work_category, comment)
@@ -67,6 +83,13 @@ func (s *Store) LogWorkRecord(ctx context.Context, rec WorkRecord) (WorkRecord, 
 			&out.WorkDate, &out.DurationHours, &out.WorkCategory, &out.Comment, &out.CreatedAt)
 	if err != nil {
 		return WorkRecord{}, fmt.Errorf("запис трудовитрат: %w", err)
+	}
+
+	if err := emitInputsChanged(ctx, tx, rec.ProjectID, rec.UserID, "work_record"); err != nil {
+		return WorkRecord{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return WorkRecord{}, fmt.Errorf("фіксація трудовитрат: %w", err)
 	}
 	return out, nil
 }
@@ -185,13 +208,22 @@ func (s *Store) ApproveCostBaseline(ctx context.Context, baselineID, approverID 
 		return fmt.Errorf("затвердження кошторису: %w", err)
 	}
 
+	if err := emitInputsChanged(ctx, tx, projectID, approverID, "cost_baseline_approved"); err != nil {
+		return err
+	}
 	return tx.Commit(ctx)
 }
 
 // RecordExpense фіксує нетрудову витрату (SWR-40.4).
 func (s *Store) RecordExpense(ctx context.Context, projectID, actorID uuid.UUID, phaseKey, category, expenseType, amount, currency, invoiceRef string, expenseDate time.Time) (uuid.UUID, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("відкриття транзакції витрати: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
 	var id uuid.UUID
-	err := s.pool.QueryRow(ctx,
+	err = tx.QueryRow(ctx,
 		`INSERT INTO core.expense_records
 		   (project_id, phase_key, cost_category, expense_type, amount, currency,
 		    invoice_reference, expense_date, recorded_by)
@@ -201,20 +233,39 @@ func (s *Store) RecordExpense(ctx context.Context, projectID, actorID uuid.UUID,
 	if err != nil {
 		return uuid.Nil, fmt.Errorf("запис витрати: %w", err)
 	}
+
+	if err := emitInputsChanged(ctx, tx, projectID, actorID, "expense"); err != nil {
+		return uuid.Nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return uuid.Nil, fmt.Errorf("фіксація витрати: %w", err)
+	}
 	return id, nil
 }
 
 // LinkPhaseDeliverable приписує результат до фази з ваговим коефіцієнтом.
 // Без цього звʼязку здобута цінність фази не обчислюється (ISO 21511).
-func (s *Store) LinkPhaseDeliverable(ctx context.Context, projectID, workProductID uuid.UUID, phaseKey, weight string) error {
-	_, err := s.pool.Exec(ctx,
+func (s *Store) LinkPhaseDeliverable(ctx context.Context, projectID, workProductID, actorID uuid.UUID, phaseKey, weight string) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("відкриття транзакції привʼязки результату: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	if _, err := tx.Exec(ctx,
 		`INSERT INTO core.phase_deliverables (project_id, phase_key, work_product_id, weight)
 		 VALUES ($1, $2, $3, $4::numeric)
 		 ON CONFLICT (project_id, work_product_id)
 		 DO UPDATE SET phase_key = EXCLUDED.phase_key, weight = EXCLUDED.weight`,
-		projectID, phaseKey, workProductID, weight)
-	if err != nil {
+		projectID, phaseKey, workProductID, weight); err != nil {
 		return fmt.Errorf("привʼязка результату до фази: %w", err)
+	}
+
+	if err := emitInputsChanged(ctx, tx, projectID, actorID, "phase_deliverable"); err != nil {
+		return err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("фіксація привʼязки результату: %w", err)
 	}
 	return nil
 }

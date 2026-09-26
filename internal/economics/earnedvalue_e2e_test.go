@@ -52,7 +52,7 @@ func TestEarnedValueBecomesNonZeroAfterApproval(t *testing.T) {
 	}
 
 	wpID := mustDraftWithRevision(t, pool, projectID, author, "REQ-1")
-	if err := econ.LinkPhaseDeliverable(ctx, projectID, wpID, "design", "1.000"); err != nil {
+	if err := econ.LinkPhaseDeliverable(ctx, projectID, wpID, author, "design", "1.000"); err != nil {
 		t.Fatalf("привʼязка результату до фази: %v", err)
 	}
 

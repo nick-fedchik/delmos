@@ -537,6 +537,36 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '503': { description: Automation engine not running }
+  /projects/{project_id}/metrics/observations:
+    get:
+      operationId: listMetricObservations
+      summary: Latest metric observations of the project (SWR-22)
+      x-required-permission: economics.read
+      description: >-
+        Latest observation of every (metric, phase) pair. Observations are
+        immutable and are produced by background workers, never by the request
+        path: the browser widget is a consumer and never a source of truth
+        (SWR-22.1). Quality is recomputed at read time, so an observation that
+        outlived its staleness threshold is reported as `stale` even though it
+        was recorded as `valid`. Observations with quality `no_data` or `error`
+        carry no value at all — absence of data is never reported as zero.
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      responses:
+        '200':
+          description: Observations
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [observations]
+                properties:
+                  observations:
+                    type: array
+                    items: { $ref: '#/components/schemas/MetricObservation' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
   /projects/{project_id}/economics/earned-value:
     get:
       operationId: getEarnedValue
@@ -1190,6 +1220,35 @@ components:
           enum: [open, approved, changes_requested, superseded]
         requested_by: { type: string, format: uuid }
         created_at: { type: string, format: date-time }
+    MetricObservation:
+      type: object
+      description: >-
+        Immutable measurement (SWR-22.2). The value is transported as a decimal
+        string and is absent entirely when quality is `no_data` or `error`.
+      required: [id, metric_key, value_type, project_id, quality, computed_at]
+      properties:
+        id: { type: string, format: uuid }
+        metric_key:
+          type: string
+          example: economics.cpi
+        value_type:
+          type: string
+          enum: [integer, decimal, duration, boolean, enum, distribution]
+        project_id: { type: string, format: uuid }
+        phase_key:
+          type: string
+          description: Empty when the metric is scoped to the project as a whole.
+        quality:
+          type: string
+          enum: [valid, stale, no_data, error]
+        value:
+          type: string
+          description: Absent when quality is `no_data` or `error`.
+        detail:
+          type: string
+          description: Reason the measurement is unavailable. Required for `no_data` and `error`.
+        computed_at: { type: string, format: date-time }
+
     EarnedValueSnapshot:
       type: object
       description: >-

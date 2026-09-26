@@ -19,6 +19,10 @@ const (
 	FieldActualCost   = "actual_cost"
 	FieldFundingLimit = "funding_limit"
 	FieldCPI          = "cpi"
+	// FieldEconomicsApplicable відрізняє «економічний контроль не
+	// запроваджено» від «даних немає». Перше означає, що перевірка
+	// незастосовна; друге блокує шлюз (METRICS.md §6).
+	FieldEconomicsApplicable = "economics_applicable"
 )
 
 // PhaseGateFacts рахує фактичні витрати, ліміт фінансування та CPI однієї
@@ -31,7 +35,7 @@ const (
 // Якщо затвердженого кошторису немає, повертається порожній набір фактів:
 // перевіряти дотримання ліміту, якого не існує, беззмістовно.
 func PhaseGateFacts(ctx context.Context, tx pgx.Tx, projectID uuid.UUID, phaseKey string, asOf time.Time) (map[string]any, error) {
-	facts := map[string]any{FieldPhaseKey: phaseKey}
+	facts := map[string]any{FieldPhaseKey: phaseKey, FieldEconomicsApplicable: false}
 
 	var baselineID uuid.UUID
 	err := tx.QueryRow(ctx,
@@ -43,6 +47,7 @@ func PhaseGateFacts(ctx context.Context, tx pgx.Tx, projectID uuid.UUID, phaseKe
 	if err != nil {
 		return nil, fmt.Errorf("читання затвердженого кошторису: %w", err)
 	}
+	facts[FieldEconomicsApplicable] = true
 
 	var actualCost, fundingLimit, earnedValue string
 	err = tx.QueryRow(ctx,

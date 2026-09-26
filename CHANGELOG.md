@@ -3,6 +3,40 @@
 Формат ґрунтується на [RELEASE-NOTES-TEMPLATE.md](docs/templates/RELEASE-NOTES-TEMPLATE.md).
 Версії `v0.y.z` не дають гарантій сумісності контрактів (див. [docs/VERSIONING.md §2.1](docs/VERSIONING.md)).
 
+## 1.0.26 — Unreleased
+
+Типізований реєстр метрик і блокування фазових шлюзів за якістю вимірювань (SWR-05).
+
+### Додано
+
+- `core.metric_definitions` — типізоване оголошення метрики. `value_type` обмежено
+  переліком `integer | decimal | duration | boolean | enum | distribution`, одиниця —
+  `count | percent | ratio | ms | currency:XXX` (SWR-21).
+- `core.metric_observations` — незмінні вимірювання з якістю `valid | stale | no_data | error`
+  (SWR-22.2). Незмінність забезпечує тригер СУБД, а не домовленість у коді.
+- Фоновий збирач показників здобутої цінності: подія `economics.inputs_changed` →
+  тригер `trigger.core.after_economics_changed` → запис вимірювань (SWR-22.1).
+  Браузер лише споживає результат і ніколи не обчислює показники сам.
+- Предикат `metrics_fresh` і правило `rule.core.gate_requires_fresh_metrics`
+  (MANDATORY_VETO): відсутні, застарілі чи помилкові вимірювання блокують закриття
+  фази (SWR-22.3).
+- Маршрут `GET /api/v1/projects/{project_id}/metrics/observations`.
+
+### Змінено
+
+- Записи економіки (`LogWorkRecord`, `RecordExpense`, `ApproveCostBaseline`,
+  `LinkPhaseDeliverable`) виконуються в транзакції та емітують `economics.inputs_changed`
+  в тій самій транзакції. Без цього показники розходилися б із даними після збою.
+- `LinkPhaseDeliverable` приймає ідентифікатор актора — він потрібен для події.
+
+### Примітки щодо відповідності
+
+- Одиницю `ratio` додано понад перелік SWR-21.2: CPI та SPI безрозмірні, і METRICS.md
+  уже оголошує їх так. Позначати індекс як `percent` було б хибно за змістом.
+- Правило свіжості застосовне лише до проєктів із затвердженим кошторисом
+  (факт `economics_applicable`). Проєкт без економічного контролю не має чого
+  вимірювати, і вічне блокування було б хибою, а не суворістю.
+
 ## 1.0.25 — Unreleased
 
 Виправлення дефектів, виявлених ревізією коду.

@@ -18,6 +18,7 @@ import (
 	"delmos/internal/automation"
 	"delmos/internal/config"
 	"delmos/internal/economics"
+	"delmos/internal/metrics"
 	"delmos/internal/project"
 	"delmos/internal/ratelimit"
 	"delmos/internal/repository"
@@ -43,6 +44,7 @@ type Deps struct {
 	Repositories *repository.Store
 	Automation   *automation.Engine
 	Economics    *economics.Store
+	Metrics      *metrics.Store
 	LoginLimiter *ratelimit.Limiter
 	CookieSecure bool
 	BootStatus   BootStatusCheck
@@ -145,6 +147,8 @@ func newRouter(logger *slog.Logger, deps Deps) http.Handler {
 	mux.HandleFunc("GET /api/v1/projects/{project_id}/plan", requireAuth(handleGetPlan(deps.Auth, deps.Projects)))
 	mux.HandleFunc("GET /api/v1/projects/{project_id}/economics/earned-value",
 		requireAuth(handleEarnedValue(deps.Auth, deps.Economics)))
+	mux.HandleFunc("GET /api/v1/projects/{project_id}/metrics/observations",
+		requireAuth(handleMetricObservations(deps.Metrics, deps.Auth)))
 	mux.HandleFunc("POST /api/v1/projects/{project_id}/economics/work-records",
 		requireAuth(requireCSRF(logger, handleLogWorkRecord(deps.Auth, deps.Economics))))
 	mux.HandleFunc("POST /api/v1/projects/{project_id}/economics/labor-rates",
