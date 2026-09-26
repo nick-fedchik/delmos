@@ -145,6 +145,18 @@ func newRouter(logger *slog.Logger, deps Deps) http.Handler {
 	mux.HandleFunc("GET /api/v1/projects/{project_id}/plan", requireAuth(handleGetPlan(deps.Auth, deps.Projects)))
 	mux.HandleFunc("GET /api/v1/projects/{project_id}/economics/earned-value",
 		requireAuth(handleEarnedValue(deps.Auth, deps.Economics)))
+	mux.HandleFunc("POST /api/v1/projects/{project_id}/economics/work-records",
+		requireAuth(requireCSRF(logger, handleLogWorkRecord(deps.Auth, deps.Economics))))
+	mux.HandleFunc("POST /api/v1/projects/{project_id}/economics/labor-rates",
+		requireAuth(requireCSRF(logger, handleSetLaborRate(deps.Auth, deps.Economics))))
+	mux.HandleFunc("POST /api/v1/projects/{project_id}/economics/cost-baselines",
+		requireAuth(requireCSRF(logger, handleCreateCostBaseline(deps.Auth, deps.Economics))))
+	mux.HandleFunc("POST /api/v1/projects/{project_id}/economics/cost-baselines/{baseline_id}/approve",
+		requireAuth(requireCSRF(logger, handleApproveCostBaseline(deps.Auth, deps.Economics))))
+	mux.HandleFunc("POST /api/v1/projects/{project_id}/economics/expenses",
+		requireAuth(requireCSRF(logger, handleRecordExpense(deps.Auth, deps.Economics))))
+	mux.HandleFunc("POST /api/v1/projects/{project_id}/economics/phase-deliverables",
+		requireAuth(requireCSRF(logger, handleLinkPhaseDeliverable(deps.Auth, deps.Economics))))
 	mux.HandleFunc("POST /api/v1/projects/{project_id}/phases/{phase_key}/transition",
 		requireAuth(requireCSRF(logger, handleTransitionPhase(deps.Auth, deps.Projects))))
 	mux.HandleFunc("POST /api/v1/projects/{project_id}/work-products/{work_product_id}/submit",

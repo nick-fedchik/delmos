@@ -91,7 +91,7 @@ func (f *phaseFixture) phase(t *testing.T, key, status string) {
 func (f *phaseFixture) approvedBaseline(t *testing.T) {
 	t.Helper()
 	ctx := context.Background()
-	id, err := f.econ.CreateCostBaseline(ctx, f.projectID, "Базовий", "EUR",
+	id, err := f.econ.CreateCostBaseline(ctx, f.actor, f.projectID, "Базовий", "EUR",
 		[]economics.BudgetLine{{
 			PhaseKey: gatePhase, CostCategory: "labor",
 			PlannedAmount: gateBudget, FundingLimit: gateLimit,

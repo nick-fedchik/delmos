@@ -39,7 +39,7 @@ func TestEarnedValueBecomesNonZeroAfterApproval(t *testing.T) {
 	projectID := mustProject(t, pool, author)
 	mustPhase(t, pool, projectID, "design")
 
-	baselineID, err := econ.CreateCostBaseline(ctx, projectID, "Базовий", "EUR",
+	baselineID, err := econ.CreateCostBaseline(ctx, author, projectID, "Базовий", "EUR",
 		[]economics.BudgetLine{{
 			PhaseKey: "design", CostCategory: "labor",
 			PlannedAmount: "10000.00", FundingLimit: "12000.00",

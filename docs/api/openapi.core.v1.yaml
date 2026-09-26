@@ -742,6 +742,175 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { description: No permission, or not assigned }
         '422': { description: Reason missing, or not in review }
+  /projects/{project_id}/economics/work-records:
+    post:
+      operationId: logWorkRecord
+      summary: Log actual hours against an active phase (SWR-39)
+      x-required-permission: timesheet.log
+      description: >-
+        Hours may only be logged against a phase in status active: a completed
+        phase is already reflected in earned value figures, and back-dating into
+        it would rewrite reports that were already issued. Omit user_id to log
+        against the caller.
+      parameters: [{ $ref: '#/components/parameters/ProjectId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [phase_key, role_key, work_date, duration_hours]
+              properties:
+                user_id: { type: string, format: uuid }
+                work_product_id: { type: string, format: uuid }
+                phase_key: { type: string }
+                role_key: { type: string }
+                work_date: { type: string, format: date }
+                duration_hours: { type: string, description: Decimal string, 0 < h <= 24 }
+                work_category: { type: string, enum: [design, development, review, testing, management] }
+                comment: { type: string }
+      responses:
+        '201': { description: Work record stored }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { description: Phase not found }
+        '422': { description: Phase not open, or invalid duration }
+  /projects/{project_id}/economics/labor-rates:
+    post:
+      operationId: setLaborRate
+      summary: Add a versioned labour cost rate (SWR-40)
+      x-required-permission: economics.manage
+      description: >-
+        Overlapping validity periods for the same role are rejected by a
+        database exclusion constraint, not by application code: two concurrent
+        transactions would otherwise create two effective rates for one date and
+        make actual cost non-deterministic.
+      parameters: [{ $ref: '#/components/parameters/ProjectId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [role_key, hourly_rate, valid_from]
+              properties:
+                role_key: { type: string }
+                hourly_rate: { type: string }
+                currency: { type: string, minLength: 3, maxLength: 3 }
+                valid_from: { type: string, format: date }
+                valid_to: { type: string, format: date }
+      responses:
+        '201': { description: Rate version stored }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: Validity period overlaps an existing rate }
+  /projects/{project_id}/economics/cost-baselines:
+    post:
+      operationId: createCostBaseline
+      summary: Create a draft cost baseline (SWR-40)
+      x-required-permission: economics.manage
+      parameters: [{ $ref: '#/components/parameters/ProjectId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, lines]
+              properties:
+                name: { type: string }
+                currency: { type: string, minLength: 3, maxLength: 3 }
+                lines:
+                  type: array
+                  items:
+                    type: object
+                    required: [phase_key, cost_category, planned_amount, funding_limit]
+                    properties:
+                      phase_key: { type: string }
+                      cost_category:
+                        type: string
+                        enum: [labor, hardware_prototypes, tooling_nre, software_licenses, testing_services, contingency]
+                      planned_amount: { type: string }
+                      funding_limit: { type: string }
+      responses:
+        '201': { description: Draft baseline created }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /projects/{project_id}/economics/cost-baselines/{baseline_id}/approve:
+    post:
+      operationId: approveCostBaseline
+      summary: Approve a cost baseline version (ADR-006)
+      x-required-permission: economics.approve
+      description: >-
+        Separation of duties: the person who drafted the baseline may not
+        approve it. Enforced by a row-level database constraint as well as by
+        the command, so an application defect cannot lift it. Approving a new
+        version supersedes the previous one — only one approved baseline may
+        exist per project, otherwise budget at completion is ambiguous.
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - name: baseline_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200': { description: Baseline approved }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { description: Baseline not found }
+        '409': { description: Already approved }
+        '422': { description: The drafter may not approve their own baseline }
+  /projects/{project_id}/economics/expenses:
+    post:
+      operationId: recordExpense
+      summary: Record a non-labour expense (SWR-40)
+      x-required-permission: economics.manage
+      parameters: [{ $ref: '#/components/parameters/ProjectId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [phase_key, cost_category, expense_type, amount, expense_date]
+              properties:
+                phase_key: { type: string }
+                cost_category:
+                  type: string
+                  enum: [labor, hardware_prototypes, tooling_nre, software_licenses, testing_services, contingency]
+                expense_type: { type: string, enum: [capex, opex] }
+                amount: { type: string }
+                currency: { type: string, minLength: 3, maxLength: 3 }
+                invoice_reference: { type: string }
+                expense_date: { type: string, format: date }
+      responses:
+        '201': { description: Expense stored }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /projects/{project_id}/economics/phase-deliverables:
+    post:
+      operationId: linkPhaseDeliverable
+      summary: Attach a deliverable to a phase with a weight (ISO 21511)
+      x-required-permission: economics.manage
+      description: >-
+        Without this link earned value cannot be measured: the 0/100 rule needs
+        to know which approved deliverables belong to the phase.
+      parameters: [{ $ref: '#/components/parameters/ProjectId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [phase_key, work_product_id]
+              properties:
+                phase_key: { type: string }
+                work_product_id: { type: string, format: uuid }
+                weight: { type: string, default: '1.000' }
+      responses:
+        '201': { description: Deliverable linked }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
 components:
   parameters:
     ProjectId:

@@ -93,7 +93,7 @@ func (s *Store) SetLaborRate(ctx context.Context, projectID *uuid.UUID, roleKey,
 // CreateCostBaseline створює чергову чернетку кошторису з рядками за фазами.
 // Версія призначається в тій самій транзакції під блокуванням проєкту, щоб
 // два паралельні виклики не отримали однаковий номер.
-func (s *Store) CreateCostBaseline(ctx context.Context, projectID uuid.UUID, name, currency string, lines []BudgetLine) (uuid.UUID, error) {
+func (s *Store) CreateCostBaseline(ctx context.Context, actorID, projectID uuid.UUID, name, currency string, lines []BudgetLine) (uuid.UUID, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return uuid.Nil, fmt.Errorf("відкриття транзакції кошторису: %w", err)
@@ -106,10 +106,10 @@ func (s *Store) CreateCostBaseline(ctx context.Context, projectID uuid.UUID, nam
 
 	var baselineID uuid.UUID
 	err = tx.QueryRow(ctx,
-		`INSERT INTO core.cost_baselines (project_id, version, name, currency, status)
+		`INSERT INTO core.cost_baselines (project_id, version, name, currency, status, created_by)
 		 VALUES ($1, COALESCE((SELECT MAX(version) FROM core.cost_baselines WHERE project_id = $1), 0) + 1,
-		         $2, $3, 'draft')
-		 RETURNING id`, projectID, name, currency).Scan(&baselineID)
+		         $2, $3, 'draft', $4)
+		 RETURNING id`, projectID, name, currency, actorID).Scan(&baselineID)
 	if err != nil {
 		return uuid.Nil, fmt.Errorf("створення кошторису: %w", err)
 	}
@@ -152,9 +152,10 @@ func (s *Store) ApproveCostBaseline(ctx context.Context, baselineID, approverID 
 
 	var projectID uuid.UUID
 	var status string
+	var createdBy uuid.UUID
 	err = tx.QueryRow(ctx,
-		`SELECT project_id, status FROM core.cost_baselines WHERE id = $1 FOR UPDATE`, baselineID).
-		Scan(&projectID, &status)
+		`SELECT project_id, status, created_by FROM core.cost_baselines WHERE id = $1 FOR UPDATE`, baselineID).
+		Scan(&projectID, &status, &createdBy)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrBaselineNotFound
 	}
@@ -163,6 +164,12 @@ func (s *Store) ApproveCostBaseline(ctx context.Context, baselineID, approverID 
 	}
 	if status == "approved" {
 		return ErrBaselineApproved
+	}
+	// Розподіл обов'язків: складач кошторису не затверджує його сам.
+	// Дублюється констрейнтом СУБД (міграція 0016) — тут лише заради
+	// зрозумілої помилки замість порушення обмеження.
+	if approverID == createdBy {
+		return ErrSelfApproval
 	}
 
 	if _, err := tx.Exec(ctx,

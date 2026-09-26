@@ -100,6 +100,14 @@ func (s *Store) TransitionPhase(ctx context.Context, actorID, projectID uuid.UUI
 		return PhaseTransitionResult{}, fmt.Errorf("аудит переходу фази: %w", err)
 	}
 
+	if err := automation.EmitEvent(ctx, tx, "phase.transitioned", &projectID, &actorID, correlationID, map[string]any{
+		"phase_key":   phaseKey,
+		"from_status": currentStatus,
+		"to_status":   targetStatus,
+	}); err != nil {
+		return PhaseTransitionResult{}, err
+	}
+
 	if err := tx.Commit(ctx); err != nil {
 		return PhaseTransitionResult{}, fmt.Errorf("фіксація переходу фази: %w", err)
 	}

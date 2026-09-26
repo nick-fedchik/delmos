@@ -109,7 +109,7 @@ func (f *fixture) createWorkProduct(t *testing.T, code, status string) uuid.UUID
 // approvedBaseline створює й затверджує кошторис на 10000 для фази design.
 func (f *fixture) approvedBaseline(t *testing.T) uuid.UUID {
 	t.Helper()
-	id, err := f.store.CreateCostBaseline(context.Background(), f.project, "Базовий", "EUR",
+	id, err := f.store.CreateCostBaseline(context.Background(), f.author, f.project, "Базовий", "EUR",
 		[]BudgetLine{{PhaseKey: "design", CostCategory: "labor", PlannedAmount: "10000.00", FundingLimit: "12000.00"}})
 	if err != nil {
 		t.Fatalf("створення кошторису: %v", err)
@@ -263,7 +263,7 @@ func TestApprovingSecondBaselineSupersedesFirst(t *testing.T) {
 	ctx := context.Background()
 	first := f.approvedBaseline(t)
 
-	second, err := f.store.CreateCostBaseline(ctx, f.project, "Переглянутий", "EUR",
+	second, err := f.store.CreateCostBaseline(ctx, f.author, f.project, "Переглянутий", "EUR",
 		[]BudgetLine{{PhaseKey: "design", CostCategory: "labor", PlannedAmount: "20000.00", FundingLimit: "20000.00"}})
 	if err != nil {
 		t.Fatalf("друга версія: %v", err)
@@ -287,6 +287,57 @@ func TestApprovingSecondBaselineSupersedesFirst(t *testing.T) {
 	}
 	if got.BudgetAtCompletion != "20000.00" {
 		t.Errorf("BAC = %s, очікувано 20000.00 з нової версії", got.BudgetAtCompletion)
+	}
+}
+
+// Розподіл обовʼязків: складач кошторису не затверджує його сам. Перевірку
+// дублює констрейнт СУБД (міграція 0016), тому вона діє й в обхід коду.
+func TestCostBaselineSelfApprovalRejected(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+
+	id, err := f.store.CreateCostBaseline(ctx, f.author, f.project, "Базовий", "EUR",
+		[]BudgetLine{{PhaseKey: "design", CostCategory: "labor", PlannedAmount: "10000.00", FundingLimit: "12000.00"}})
+	if err != nil {
+		t.Fatalf("створення кошторису: %v", err)
+	}
+
+	if err := f.store.ApproveCostBaseline(ctx, id, f.author); err == nil {
+		t.Fatal("складач кошторису не має права його затверджувати")
+	}
+
+	var status string
+	if err := f.pool.QueryRow(ctx, `SELECT status FROM core.cost_baselines WHERE id = $1`, id).
+		Scan(&status); err != nil {
+		t.Fatalf("читання статусу: %v", err)
+	}
+	if status != "draft" {
+		t.Errorf("статус = %q, очікувано draft — затвердження мало відкотитися", status)
+	}
+
+	// Інша особа затверджує без перешкод.
+	if err := f.store.ApproveCostBaseline(ctx, id, f.checker); err != nil {
+		t.Fatalf("незалежний затверджувач має проходити: %v", err)
+	}
+}
+
+// Констрейнт СУБД тримає інваріант навіть при помилці в застосунку.
+func TestCostBaselineSelfApprovalRejectedByDatabase(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+
+	id, err := f.store.CreateCostBaseline(ctx, f.author, f.project, "Базовий", "EUR",
+		[]BudgetLine{{PhaseKey: "design", CostCategory: "labor", PlannedAmount: "1.00", FundingLimit: "1.00"}})
+	if err != nil {
+		t.Fatalf("створення кошторису: %v", err)
+	}
+
+	_, err = f.pool.Exec(ctx,
+		`UPDATE core.cost_baselines
+		 SET status = 'approved', approved_by = created_by, approved_at = now()
+		 WHERE id = $1`, id)
+	if err == nil {
+		t.Fatal("СУБД мала відхилити самозатвердження в обхід коду")
 	}
 }
 
