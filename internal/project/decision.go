@@ -301,3 +301,21 @@ func nullIfBlank(s string) any {
 	}
 	return s
 }
+
+// planRevisionApproved повідомляє, чи має вказана ревізія позитивне
+// погодження через робочий процес рецензування (ADR-009 §5).
+func planRevisionApproved(ctx context.Context, tx pgx.Tx, revisionID uuid.UUID) (bool, error) {
+	var approved bool
+	if err := tx.QueryRow(ctx,
+		`SELECT EXISTS (
+		    SELECT 1
+		    FROM core.review_decisions d
+		    JOIN core.review_requests rr ON rr.id = d.review_request_id
+		    WHERE rr.revision_id = $1
+		      AND d.decision_kind = 'approval'
+		      AND d.outcome = 'positive'
+		 )`, revisionID).Scan(&approved); err != nil {
+		return false, fmt.Errorf("перевірка погодження ревізії плану: %w", err)
+	}
+	return approved, nil
+}

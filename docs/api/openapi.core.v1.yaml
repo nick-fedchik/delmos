@@ -332,6 +332,12 @@ paths:
       operationId: applyApprovedPlan
       summary: Apply a separately approved PLAN-001 revision
       x-required-permission: plan.apply
+      description: >-
+        The target revision must already carry a positive approval recorded
+        through the review workflow (ADR-009 §5); otherwise the call fails with
+        422 plan_not_approved. Approval is checked per revision, not by the work
+        product status: once approved the plan stays approved, so a newer
+        unapproved revision would otherwise slip into effect unnoticed.
       parameters:
         - $ref: '#/components/parameters/ProjectId'
         - $ref: '#/components/parameters/CsrfToken'

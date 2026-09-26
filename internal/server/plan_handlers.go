@@ -170,6 +170,8 @@ func handleApplyPlan(authSvc *auth.Service, projects *project.Store) http.Handle
 			writeJSONError(w, http.StatusNotFound, "not_found", "план проєкту не знайдено")
 		case errors.Is(err, project.ErrInvalidPlanManifest):
 			writeJSONError(w, http.StatusUnprocessableEntity, "invalid_plan_manifest", err.Error())
+		case errors.Is(err, project.ErrPlanNotApproved):
+			writeJSONError(w, http.StatusUnprocessableEntity, "plan_not_approved", err.Error())
 		case err != nil:
 			writeJSONError(w, http.StatusInternalServerError, "internal_error", "не вдалося застосувати план проєкту")
 		default:

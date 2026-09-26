@@ -21,6 +21,7 @@ const (
 
 var (
 	ErrPlanNotFound        = errors.New("план проєкту не знайдено")
+	ErrPlanNotApproved     = errors.New("ревізію плану не погоджено")
 	ErrInvalidPlanManifest = errors.New("некоректний маніфест Generic Project Plan")
 )
 
@@ -453,6 +454,18 @@ func (s *Store) ApplyPlan(ctx context.Context, actorID, projectID uuid.UUID, rev
 
 	if err := ValidateGenericPlanManifest(manifest); err != nil {
 		return PlanApplied{}, err
+	}
+
+	// ADR-009 §5: план є артефактом і вводиться в дію лише після погодження
+	// ТІЄЇ САМОЇ ревізії. Перевіряється наявність погодження на конкретну
+	// ревізію, а не статус артефакту: після першого затвердження план
+	// лишається approved, і нова непогоджена ревізія інакше пройшла б.
+	approved, err := planRevisionApproved(ctx, tx, targetRevID)
+	if err != nil {
+		return PlanApplied{}, err
+	}
+	if !approved {
+		return PlanApplied{}, fmt.Errorf("%w: ревізія %s", ErrPlanNotApproved, targetRevID)
 	}
 
 	newGeneration := currentGen + 1
