@@ -71,14 +71,14 @@ flowchart LR
 
 ## 5. Інженерно-економічні метрики та EVM (Project Economics)
 
-Модулі `management.resources` та `management.economics` надають стандартизовані формули аналізу вартості та освоєного обсягу (**Earned Value Management за стандартами PMBOK / SWEBOK / ISO 21502**):
+Модулі `management.resources` та `management.economics` надають стандартизовані формули аналізу вартості та здобутої цінності (**Earned Value Management за ДСТУ ISO 21508:2022**, див. [ADR-011](decisions/ADR-011-iso-21500-series-normative-base.md)). Позначення BCWS / BCWP наведено довідково як усталені англомовні синоніми.
 
 | Ключ метрики | Тип / Одиниця | Позначення | Формула та економічна інтерпретація |
 | --- | --- | --- | --- |
 | `resources.utilization_rate` | decimal, `percent` | **Utilization** | Відношення списаних годин до номінальної місткості (FTE capacity) за календарем |
 | `economics.pv` | decimal, `currency` | **Planned Value (PV)** | Базовий плановий кошторис робіт за розкладом на поточну дату (BCWS) |
 | `economics.ac` | decimal, `currency` | **Actual Cost (AC)** | Фактично понесені витрати: $\sum (\text{hours} \times \text{LaborRate}) + \sum \text{ExpenseRecords}$ |
-| `economics.ev` | decimal, `currency` | **Earned Value (EV)** | Освоєний обсяг: планова вартість фактично завершених та затверджених артефактів (BCWP) |
+| `economics.ev` | decimal, `currency` | **Earned Value (EV)** | Здобута цінність: планова вартість фактично завершених та затверджених артефактів (BCWP) |
 | `economics.cpi` | decimal, `ratio` | **Cost Performance** | $CPI = EV / AC$ ($>1$ — економія кошторису, $<1$ — перевитрата бюджету) |
 | `economics.spi` | decimal, `ratio` | **Schedule Performance**| $SPI = EV / PV$ ($>1$ — випередження, $<1$ — відставання від графіка) |
 | `economics.cv` | decimal, `currency` | **Cost Variance** | $CV = EV - AC$ (абсолютне вартісне відхилення від плану) |

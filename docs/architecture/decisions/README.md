@@ -20,6 +20,7 @@
 | [ADR-008](ADR-008-svg-vector-visualization-for-compliance.md) | Використання векторної графіки (SVG / Vue Flow) для візуалізації графів та аудитів | Accepted | Інтерфейс, RTM, Аудит, Векторна графіка |
 | [ADR-009](ADR-009-core-review-and-approval-policy.md) | Базовий кворум незалежних Review/Approval, повернення на зміни та окреме застосування плану | Accepted (цільовий контракт) | Ядро, права, workflow, SoD |
 | [ADR-010](ADR-010-audit-evidence-and-outbox-retention.md) | Незмінні аудиторські докази й контрольоване очищення технічної черги без каскадів | Accepted (цільовий контракт) | Ядро, збереження доказів, outbox |
+| [ADR-011](ADR-011-iso-21500-series-normative-base.md) | Серія ISO 21500 як нормативна база керування проєктами й проєктної економіки | Accepted | Термінологія, Економіка, WBS, Комплаєнс |
 
 ---
 
