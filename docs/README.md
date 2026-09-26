@@ -12,7 +12,7 @@
 flowchart TD
     Req["1. Вимоги (Requirements)<br/>• Ієрархічний каталог requirements/README.md<br/>• Стейкхолдерські SHR-01..14<br/>• Системні SWR-01..48<br/>• Вимоги до середовища SYSTEM_REQUIREMENTS.md"]
     ADR["2. Архітектурні рішення (ADR)<br/>• Реєстр рішень decisions/README.md<br/>• Рішення ADR-001..010"]
-    Memos["3. Інженерні меморандуми (Memos)<br/>• Реєстр меморандумів memos/README.md<br/>• Меморандуми MEMO-001..004"]
+    Memos["3. Інженерні меморандуми (Memos)<br/>• Реєстр меморандумів memos/README.md<br/>• Меморандуми MEMO-001..005"]
     Specs["4. Технічні специфікації (Specs)<br/>• Реєстр specifications/README.md<br/>• SPEC-01..04 і CORE-CONTRACT-001"]
     Arch["5. Архітектура підсистем (Architecture)<br/>• 16 нормативних документів ядра, даних та модулів"]
     UC["6. Сценарії використання (Use Cases)<br/>• Адміністратор (ADM-001..016)<br/>• Проєктний менеджер (PM-001..020)"]
@@ -57,6 +57,7 @@ flowchart TD
   * [MEMO-002: Стратегія сертифікаційних аудитів та Tool Qualification за ISO 26262 (TCL)](memos/MEMO-002-tool-qualification-and-compliance-strategy.md)
   * [MEMO-003: Архітектура Graph-RAG у PostgreSQL (вектори + рекурсивні CTE)](memos/MEMO-003-graph-rag-architecture-in-postgresql.md)
   * [MEMO-004: Стратегія валідації цілісності продуктового задуму (Working Backwards, Wardley Mapping, beachhead-сегмент, OSS-готовність)](memos/MEMO-004-product-concept-validation-strategy.md)
+  * [MEMO-005: Модуль UML для документування вимог, сутностей, відносин і структур (OMG UML 2.5.1)](memos/MEMO-005-uml-module-for-structural-and-requirements-modeling.md)
 
 ### 2.4. Технічні специфікації (Specifications)
 * **[Реєстр технічних специфікацій](specifications/README.md)**:

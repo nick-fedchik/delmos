@@ -23,9 +23,10 @@ import (
 const DefaultPath = "/usr/local/etc/delmos/delmos.yaml"
 
 type Config struct {
-	Server   Server   `yaml:"server"`
-	Database Database `yaml:"database"`
-	Logging  Logging  `yaml:"logging"`
+	Server     Server     `yaml:"server"`
+	Database   Database   `yaml:"database"`
+	Logging    Logging    `yaml:"logging"`
+	Automation Automation `yaml:"automation"`
 }
 
 type Server struct {
@@ -58,6 +59,14 @@ type Logging struct {
 	Format string `yaml:"format"`
 }
 
+// Automation налаштовує фоновий диспетчер та планувальник рушія автоматизації
+// (ADR-007, SPEC-04): інтервал опитування, тривалість оренди (Lease Fencing) та розмір пачки.
+type Automation struct {
+	PollInterval Duration `yaml:"poll_interval"`
+	LeaseSeconds int      `yaml:"lease_seconds"`
+	BatchSize    int      `yaml:"batch_size"`
+}
+
 func defaults() Config {
 	return Config{
 		Server: Server{
@@ -80,6 +89,11 @@ func defaults() Config {
 		Logging: Logging{
 			Level:  "info",
 			Format: "json",
+		},
+		Automation: Automation{
+			PollInterval: Duration(2 * time.Second),
+			LeaseSeconds: 30,
+			BatchSize:    10,
 		},
 	}
 }
@@ -207,6 +221,16 @@ func (c Config) validate() error {
 	}
 	if c.Database.MaxConnections < 1 || c.Database.MaxConnections > 500 {
 		problems = append(problems, fmt.Sprintf("database.max_connections %d поза діапазоном 1..500", c.Database.MaxConnections))
+	}
+
+	if c.Automation.PollInterval <= 0 {
+		problems = append(problems, "automation.poll_interval має бути більшим за нуль")
+	}
+	if c.Automation.LeaseSeconds < 1 {
+		problems = append(problems, "automation.lease_seconds має бути більшим за нуль")
+	}
+	if c.Automation.BatchSize < 1 || c.Automation.BatchSize > 1000 {
+		problems = append(problems, fmt.Sprintf("automation.batch_size %d поза діапазоном 1..1000", c.Automation.BatchSize))
 	}
 
 	switch c.Logging.Level {

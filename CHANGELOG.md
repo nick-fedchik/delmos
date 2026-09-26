@@ -3,6 +3,21 @@
 Формат ґрунтується на [RELEASE-NOTES-TEMPLATE.md](docs/templates/RELEASE-NOTES-TEMPLATE.md).
 Версії `v0.y.z` не дають гарантій сумісності контрактів (див. [docs/VERSIONING.md §2.1](docs/VERSIONING.md)).
 
+## 1.0.18 — Unreleased
+
+### Додано
+
+- Рушій автоматизації: події, тригери, правила, FSM і планувальник (Етап 4, повна SPEC-04, ADR-007).
+  - Міграція `0013_automation_engine.sql`: `core.event_definitions`, `core.event_outbox` (транзакційний outbox), `core.trigger_definitions`, `core.trigger_subscriptions`, `core.event_deliveries` (Lease Fencing), `core.rule_definitions` (типізований DSL `when`/`assert`, без довільного SQL/JS — SWR-26), `core.workflow_definitions` (декларативна FSM), `core.schedule_definitions`/`core.schedule_occurrences`.
+  - `internal/automation`: `EmitEvent` (транзакційний outbox), `EnforceRules` (before-фаза MANDATORY_VETO/ADVISORY_WARNING з таблицею рішень not_applicable/passed/violated/evaluation_error), `Engine` з `DispatchPending`/`ClaimAndProcess` (Lease Fencing `FOR UPDATE SKIP LOCKED`, dead-letter після `max_attempts`), `LoadWorkflow`/`ApplyTransition` (FSM-гарди та ефекти `emit_event`), `TickScheduler` (режими `once`/`fixed_rate`/`fixed_delay`/`calendar`; `calendar` — мінімальний 5-польовий cron, свідоме звуження обсягу без повного RFC 5545).
+  - `wp.revision_committed` тепер публікується в outbox замість синхронного розрахунку — ембедінги (VEC-01) та каскадне поширення `is_suspect` (GRP-03) виконуються асинхронно через `trigger.core.after_revision_committed` (SWR-36.2).
+  - Жорстко закодована перевірка «obsolete WP не редагується» замінена декларативним правилом `rule.core.no_revision_when_obsolete` (MANDATORY_VETO) через `trigger.core.before_wp_transition`.
+  - `GET /api/v1/system/automation/status`: адміністративне спостереження (лічильники доставок за статусом, dead-letter список) під новим правом `system.observe` (system.administrator).
+  - Диспетчер і планувальник працюють у тому самому процесі, що й HTTP-сервер (`cmd/delmos/main.go`), керовані `configs/delmos.yaml` (`automation.poll_interval`/`lease_seconds`/`batch_size`).
+  - Тести: атомарний запис outbox, наскрізна доставка, dead-letter після max_attempts, lease fencing під конкурентним навантаженням без подвійної доставки, таблиця рішень правил, dedup планувальника (`schedule_id`, `occurrence_time_utc`), FSM-гарди.
+  - `docs/api/openapi.core.v1.yaml`: `GET /system/automation/status` + схеми `AutomationStatus`/`DeadLetterEntry`.
+- MEMO-005: концептуальний меморандум щодо модуля UML (`tooling.uml_modeling`) для документування вимог, сутностей, відносин і структур у нотації OMG UML 2.5.1 — діаграма як проєкція наявних сутностей ядра, без нового джерела істини.
+
 ## 1.0.17 — Unreleased
 
 ### Додано

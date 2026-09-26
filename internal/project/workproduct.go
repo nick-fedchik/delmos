@@ -7,6 +7,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+
+	"delmos/internal/automation"
 )
 
 var (
@@ -84,7 +86,11 @@ func (s *Store) CreateWorkProduct(ctx context.Context, actorID, projectID uuid.U
 		return WorkProduct{}, WorkProductRevision{}, fmt.Errorf("запис аудиторської події створення work product: %w", err)
 	}
 
-	if err := upsertEmbedding(ctx, tx, wpType, wp.ID, revision.ID, title, body); err != nil {
+	// Вектор рахується асинхронно через outbox: диспетчер викликає
+	// trigger.core.after_revision_committed після commit цієї транзакції.
+	if err := automation.EmitEvent(ctx, tx, "wp.revision_committed", &projectID, &actorID, correlationID, map[string]any{
+		"work_product_id": wp.ID.String(), "revision_id": revision.ID.String(), "code": code, "type": wpType,
+	}); err != nil {
 		return WorkProduct{}, WorkProductRevision{}, err
 	}
 
@@ -120,8 +126,18 @@ func (s *Store) ReviseWorkProduct(ctx context.Context, actorID, projectID, workP
 	if err != nil {
 		return WorkProductRevision{}, fmt.Errorf("читання work product для ревізії: %w", err)
 	}
-	if wp.Status == "obsolete" {
-		return WorkProductRevision{}, ErrWorkProductObsolete
+
+	correlationID := uuid.New()
+
+	// Замінює раніше жорстко закодовану перевірку обов'язковим правилом
+	// рушія (trigger.core.before_wp_transition, MANDATORY_VETO) — SWR-13/14.
+	if err := automation.EnforceRules(ctx, tx, "trigger.core.before_wp_transition",
+		automation.EvalContext{Fields: map[string]any{"status": wp.Status}}, actorID, projectID, correlationID); err != nil {
+		var violation *automation.RuleViolationError
+		if errors.As(err, &violation) && violation.RuleKey == "rule.core.no_revision_when_obsolete" {
+			return WorkProductRevision{}, ErrWorkProductObsolete
+		}
+		return WorkProductRevision{}, err
 	}
 	if wp.RowVersion != expectedRowVersion {
 		return WorkProductRevision{}, ErrVersionConflict
@@ -160,23 +176,19 @@ func (s *Store) ReviseWorkProduct(ctx context.Context, actorID, projectID, workP
 		return WorkProductRevision{}, ErrVersionConflict
 	}
 
-	// GRP-03 Change Impact Analysis: нова ревізія позначає підозрілими всі
-	// ребра графа, що прямо чи опосередковано спираються на цей артефакт.
-	suspectCount, err := propagateSuspect(ctx, tx, projectID, workProductID)
-	if err != nil {
-		return WorkProductRevision{}, err
-	}
-
-	correlationID := uuid.New()
 	_, err = tx.Exec(ctx,
 		`INSERT INTO core.audit_events (actor_user_id, action, scope_type, scope_id, outcome, detail, correlation_id)
 		 VALUES ($1, 'wp.revise', 'project', $2, 'success', $3, $4)`,
-		actorID, projectID, map[string]any{"work_product_id": workProductID.String(), "revision_number": revision.RevisionNumber, "suspect_links_marked": suspectCount}, correlationID)
+		actorID, projectID, map[string]any{"work_product_id": workProductID.String(), "revision_number": revision.RevisionNumber}, correlationID)
 	if err != nil {
 		return WorkProductRevision{}, fmt.Errorf("запис аудиторської події ревізії: %w", err)
 	}
 
-	if err := upsertEmbedding(ctx, tx, wp.Type, workProductID, revision.ID, wp.Title, body); err != nil {
+	// Вектор та каскадне поширення is_suspect (GRP-03) виконуються асинхронно
+	// диспетчером після commit (trigger.core.after_revision_committed, SWR-36.2).
+	if err := automation.EmitEvent(ctx, tx, "wp.revision_committed", &projectID, &actorID, correlationID, map[string]any{
+		"work_product_id": workProductID.String(), "revision_id": revision.ID.String(), "code": wp.Code, "type": wp.Type,
+	}); err != nil {
 		return WorkProductRevision{}, err
 	}
 

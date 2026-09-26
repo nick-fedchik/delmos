@@ -6,9 +6,11 @@ import (
 	"log/slog"
 	"testing"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"delmos/internal/auth"
+	"delmos/internal/automation"
 	"delmos/internal/migrate"
 	"delmos/internal/project"
 	"delmos/internal/testsupport"
@@ -17,10 +19,11 @@ import (
 // TestFindSimilarWorkProductsHybridSearch перевіряє VEC-01/VEC-02: вектор
 // прив'язується до точної ревізії, а гібридний пошук повертає семантично
 // (лексично) близькі вимоги в межах проєкту, ігноруючи артефакт-джерело й
-// артефакти інших проєктів.
+// артефакти інших проєктів. Ембедінг рахується асинхронно через outbox
+// (SWR-36.2) — тест доводить чергу до порожнього стану через runOutboxOnce.
 func TestFindSimilarWorkProductsHybridSearch(t *testing.T) {
 	ctx := context.Background()
-	store, authStore := newTestStore(t)
+	store, authStore, engine := newTestStoreWithEngine(t)
 	userID := newTestUser(t, authStore, "vec-author")
 	proj, err := store.CreateWithPlan(ctx, userID, "VEC-001", "Vector project", "")
 	if err != nil {
@@ -57,6 +60,8 @@ func TestFindSimilarWorkProductsHybridSearch(t *testing.T) {
 		t.Fatalf("створення вимоги в іншому проєкті: %v", err)
 	}
 
+	runOutboxOnce(t, engine)
+
 	baseDetail, err := store.GetWorkProduct(ctx, proj.Project.ID, base.ID)
 	if err != nil {
 		t.Fatalf("читання базової вимоги: %v", err)
@@ -82,32 +87,29 @@ func TestFindSimilarWorkProductsHybridSearch(t *testing.T) {
 	}
 }
 
-// newTestStoreWithPool — той самий контур, що й newTestStore, але додатково
-// повертає пул з'єднань для прямих SQL-перевірок, недоступних через публічне
-// API Store (потрібно для симуляції "застарілого" вектора в VEC-03).
-func newTestStoreWithPool(t *testing.T) (*project.Store, *pgxpool.Pool) {
-	t.Helper()
-
-	pool, err := pgxpool.New(context.Background(), testsupport.NewDatabase(t))
-	if err != nil {
-		t.Fatalf("підключення до тимчасової бази: %v", err)
-	}
-	t.Cleanup(pool.Close)
-
-	if err := migrate.Apply(context.Background(), pool, slog.New(slog.NewTextHandler(io.Discard, nil))); err != nil {
-		t.Fatalf("застосування міграцій: %v", err)
-	}
-
-	return project.NewStore(pool), pool
-}
-
 // TestFindSimilarWorkProductsIgnoresOtherModelVectors перевіряє VEC-03: зміна
 // активної моделі ембедінгів не видаляє старі вектори, але пошук працює
 // лише серед векторів поточної моделі — застарілий вектор не спотворює видачу.
 func TestFindSimilarWorkProductsIgnoresOtherModelVectors(t *testing.T) {
 	ctx := context.Background()
-	store, pool := newTestStoreWithPool(t)
+	pool, err := pgxpool.New(ctx, testsupport.NewDatabase(t))
+	if err != nil {
+		t.Fatalf("підключення до тимчасової бази: %v", err)
+	}
+	t.Cleanup(pool.Close)
+	if err := migrate.Apply(ctx, pool, slog.New(slog.NewTextHandler(io.Discard, nil))); err != nil {
+		t.Fatalf("застосування міграцій: %v", err)
+	}
+
+	store := project.NewStore(pool)
 	authStore := auth.NewStore(pool)
+	engine := automation.NewEngine(pool, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	engine.RegisterHandler("trigger.core.after_revision_committed", func(ctx context.Context, tx pgx.Tx, env automation.Envelope) error {
+		workProductID := mustParseUUIDField(t, env, "work_product_id")
+		revisionID := mustParseUUIDField(t, env, "revision_id")
+		return store.ApplyRevisionCommittedEffects(ctx, tx, workProductID, revisionID)
+	})
+
 	userID := newTestUser(t, authStore, "vec03-author")
 	proj, err := store.CreateWithPlan(ctx, userID, "VEC-003", "Model switch project", "")
 	if err != nil {
@@ -123,6 +125,8 @@ func TestFindSimilarWorkProductsIgnoresOtherModelVectors(t *testing.T) {
 	if err != nil {
 		t.Fatalf("створення вимоги B: %v", err)
 	}
+
+	runOutboxOnce(t, engine)
 
 	// Симулюємо застарілий вектор: B "залишився" з попередньої моделі
 	// ембедінгів після її зміни — рядок не видаляється, лише більше не

@@ -513,6 +513,24 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/Hidden' }
+  /system/automation/status:
+    get:
+      operationId: getAutomationStatus
+      summary: Observe the automation engine outbox queue (ADR-007, SPEC-04)
+      x-required-permission: system.observe
+      description: >-
+        Delivery counts by status and the dead-letter list for administrator
+        monitoring (RUNBOOK.md, ADM-007). Not a project-scoped endpoint.
+      responses:
+        '200':
+          description: Delivery status counts and dead-letter entries
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AutomationStatus'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '503': { description: Automation engine not running }
 components:
   securitySchemes:
     sessionCookie:
@@ -729,6 +747,27 @@ components:
         title: { type: string }
         status: { type: string }
         cosine_similarity: { type: number, format: double, minimum: -1, maximum: 1 }
+    DeadLetterEntry:
+      type: object
+      required: [delivery_id, event_key, trigger_key, delivery_attempts, last_error, created_at]
+      properties:
+        delivery_id: { type: string, format: uuid }
+        event_key: { type: string }
+        trigger_key: { type: string }
+        delivery_attempts: { type: integer }
+        last_error: { type: string }
+        created_at: { type: string, format: date-time }
+    AutomationStatus:
+      type: object
+      required: [counts, dead_letters]
+      properties:
+        counts:
+          type: object
+          additionalProperties: { type: integer }
+          description: Delivery counts keyed by status (pending, leased, delivered, failed, dead_letter).
+        dead_letters:
+          type: array
+          items: { $ref: '#/components/schemas/DeadLetterEntry' }
     SpecificationView:
       type: object
       required: [specification_id, work_product, manifest]

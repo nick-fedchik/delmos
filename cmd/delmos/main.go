@@ -14,7 +14,11 @@ import (
 
 	"golang.org/x/time/rate"
 
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+
 	"delmos/internal/auth"
+	"delmos/internal/automation"
 	"delmos/internal/config"
 	"delmos/internal/logging"
 	"delmos/internal/migrate"
@@ -97,6 +101,27 @@ func run() error {
 		return runBootstrapAdmin(ctx, authStore, *bootstrapAdmin)
 	}
 
+	projects := project.NewStore(pool)
+
+	// Рушій автоматизації (ADR-007, SPEC-04): диспетчер outbox і планувальник
+	// у тому самому процесі, що й HTTP-сервер (монолітний бінарник).
+	automationEngine := automation.NewEngine(pool, logger)
+	automationEngine.SetLeaseDuration(time.Duration(cfg.Automation.LeaseSeconds) * time.Second)
+	automationEngine.SetBatchSize(cfg.Automation.BatchSize)
+	automationEngine.RegisterHandler("trigger.core.after_revision_committed",
+		func(ctx context.Context, tx pgx.Tx, env automation.Envelope) error {
+			workProductID, err := uuid.Parse(fmt.Sprint(env.Payload["work_product_id"]))
+			if err != nil {
+				return fmt.Errorf("некоректний work_product_id у події %s: %w", env.EventKey, err)
+			}
+			revisionID, err := uuid.Parse(fmt.Sprint(env.Payload["revision_id"]))
+			if err != nil {
+				return fmt.Errorf("некоректний revision_id у події %s: %w", env.EventKey, err)
+			}
+			return projects.ApplyRevisionCommittedEffects(ctx, tx, workProductID, revisionID)
+		})
+	go automationEngine.Run(ctx, time.Duration(cfg.Automation.PollInterval))
+
 	ready := func(ctx context.Context) error {
 		if err := pool.Ping(ctx); err != nil {
 			return fmt.Errorf("пінг PostgreSQL: %w", err)
@@ -166,8 +191,9 @@ func run() error {
 	deps := server.Deps{
 		Ready:        ready,
 		Auth:         auth.NewService(authStore),
-		Projects:     project.NewStore(pool),
+		Projects:     projects,
 		Repositories: repository.NewStore(pool, repository.NewPlainGitProvider()),
+		Automation:   automationEngine,
 		LoginLimiter: ratelimit.New(rate.Every(3*time.Second), 5), // 5 спроб одразу, далі 1 на 3 секунди на IP
 		CookieSecure: cfg.Server.CookieSecure,
 		BootStatus:   bootCheck,

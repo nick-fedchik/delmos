@@ -26,3 +26,10 @@ database:
 logging:
   level: info
   format: json
+
+# Рушій автоматизації (ADR-007, SPEC-04): диспетчер outbox і планувальник
+# опитують чергу з інтервалом poll_interval у тому самому процесі.
+automation:
+  poll_interval: 2s
+  lease_seconds: 30
+  batch_size: 10

@@ -14,6 +14,7 @@
 | [MEMO-002](MEMO-002-tool-qualification-and-compliance-strategy.md) | Стратегія проходження сертифікаційних аудитів та кваліфікація інструменту за ISO 26262 (TCL) | Сертифікація, Аудит, Tool Qualification |
 | [MEMO-003](MEMO-003-graph-rag-architecture-in-postgresql.md) | Архітектура Graph-RAG у PostgreSQL: поєднання векторних ембедінгів та рекурсивних графів | AI-асистування, Семантика, Графи |
 | [MEMO-004](MEMO-004-product-concept-validation-strategy.md) | Стратегія валідації цілісності продуктового задуму | Продуктовий менеджмент, OSS-готовність, Go-to-Market |
+| [MEMO-005](MEMO-005-uml-module-for-structural-and-requirements-modeling.md) | Модуль UML для документування вимог, сутностей, відносин і структур (OMG UML 2.5.1) | Візуалізація, Стандартизація, Interop |
 
 ---
 

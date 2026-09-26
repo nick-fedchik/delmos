@@ -63,7 +63,7 @@ func TestTraverseTraceabilityDetectsCycle(t *testing.T) {
 // прямих і непрямих залежних ребрах; явне підтвердження знімає прапорець.
 func TestReviseWorkProductPropagatesSuspectFlag(t *testing.T) {
 	ctx := context.Background()
-	store, authStore := newTestStore(t)
+	store, authStore, engine := newTestStoreWithEngine(t)
 	userID := newTestUser(t, authStore, "impact-author")
 	proj, err := store.CreateWithPlan(ctx, userID, "IMPACT-001", "Impact project", "")
 	if err != nil {
@@ -99,6 +99,8 @@ func TestReviseWorkProductPropagatesSuspectFlag(t *testing.T) {
 	if _, err := store.ReviseWorkProduct(ctx, userID, proj.Project.ID, req.ID, 1, "оновлений текст вимоги", nil); err != nil {
 		t.Fatalf("ревізія вимоги: %v", err)
 	}
+
+	runOutboxOnce(t, engine)
 
 	links, err := store.ListTraceLinks(ctx, proj.Project.ID, false)
 	if err != nil {

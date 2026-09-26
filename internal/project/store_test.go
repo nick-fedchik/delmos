@@ -8,9 +8,11 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"delmos/internal/auth"
+	"delmos/internal/automation"
 	"delmos/internal/migrate"
 	"delmos/internal/project"
 	"delmos/internal/testsupport"
@@ -30,6 +32,69 @@ func newTestStore(t *testing.T) (*project.Store, *auth.Store) {
 	}
 
 	return project.NewStore(pool), auth.NewStore(pool)
+}
+
+// newTestStoreWithEngine — той самий контур, що й newTestStore, але додатково
+// підключає рушій автоматизації з зареєстрованим обробником
+// trigger.core.after_revision_committed (як у бойовому cmd/delmos/main.go),
+// щоб тести могли детерміновано прогнати asynchronous-ефекти через
+// runOutboxOnce замість очікування фонового тикера.
+func newTestStoreWithEngine(t *testing.T) (*project.Store, *auth.Store, *automation.Engine) {
+	t.Helper()
+
+	pool, err := pgxpool.New(context.Background(), testsupport.NewDatabase(t))
+	if err != nil {
+		t.Fatalf("підключення до тимчасової бази: %v", err)
+	}
+	t.Cleanup(pool.Close)
+
+	if err := migrate.Apply(context.Background(), pool, slog.New(slog.NewTextHandler(io.Discard, nil))); err != nil {
+		t.Fatalf("застосування міграцій: %v", err)
+	}
+
+	projects := project.NewStore(pool)
+	engine := automation.NewEngine(pool, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	engine.RegisterHandler("trigger.core.after_revision_committed", func(ctx context.Context, tx pgx.Tx, env automation.Envelope) error {
+		workProductID, err := uuid.Parse(env.Payload["work_product_id"].(string))
+		if err != nil {
+			return err
+		}
+		revisionID, err := uuid.Parse(env.Payload["revision_id"].(string))
+		if err != nil {
+			return err
+		}
+		return projects.ApplyRevisionCommittedEffects(ctx, tx, workProductID, revisionID)
+	})
+
+	return projects, auth.NewStore(pool), engine
+}
+
+// runOutboxOnce виконує один цикл диспетчеризації й обробки — детерміновано
+// доводить чергу outbox до порожнього стану для вже записаних подій.
+func runOutboxOnce(t *testing.T, engine *automation.Engine) {
+	t.Helper()
+	ctx := context.Background()
+	if _, err := engine.DispatchPending(ctx); err != nil {
+		t.Fatalf("диспетчеризація подій outbox: %v", err)
+	}
+	if _, err := engine.ClaimAndProcess(ctx); err != nil {
+		t.Fatalf("обробка доставок outbox: %v", err)
+	}
+}
+
+// mustParseUUIDField читає рядкове поле payload конверта події як uuid.UUID
+// у тестових обробниках trigger.core.after_revision_committed.
+func mustParseUUIDField(t *testing.T, env automation.Envelope, field string) uuid.UUID {
+	t.Helper()
+	raw, ok := env.Payload[field].(string)
+	if !ok {
+		t.Fatalf("поле %s відсутнє у payload події %s", field, env.EventKey)
+	}
+	id, err := uuid.Parse(raw)
+	if err != nil {
+		t.Fatalf("некоректний uuid у полі %s: %v", field, err)
+	}
+	return id
 }
 
 func newTestUser(t *testing.T, authStore *auth.Store, login string) uuid.UUID {
