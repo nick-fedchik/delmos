@@ -145,6 +145,8 @@ func newRouter(logger *slog.Logger, deps Deps) http.Handler {
 	mux.HandleFunc("GET /api/v1/projects/{project_id}/plan", requireAuth(handleGetPlan(deps.Auth, deps.Projects)))
 	mux.HandleFunc("GET /api/v1/projects/{project_id}/economics/earned-value",
 		requireAuth(handleEarnedValue(deps.Auth, deps.Economics)))
+	mux.HandleFunc("POST /api/v1/projects/{project_id}/phases/{phase_key}/transition",
+		requireAuth(requireCSRF(logger, handleTransitionPhase(deps.Auth, deps.Projects))))
 	mux.HandleFunc("POST /api/v1/projects/{project_id}/plan/revisions",
 		requireAuth(requireCSRF(logger, handleRevisePlan(deps.Auth, deps.Projects))))
 	mux.HandleFunc("POST /api/v1/projects/{project_id}/plan/apply",

@@ -564,6 +564,58 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '409': { description: No approved cost baseline for the project }
+  /projects/{project_id}/phases/{phase_key}/transition:
+    post:
+      operationId: transitionPhase
+      summary: Move a project phase through its lifecycle (SHR-13, ADR-006)
+      x-required-permission: plan.apply
+      description: >-
+        Transitions a phase not_started -> active -> completed. Backward and
+        skipping transitions are rejected: a completed phase is already
+        reflected in earned value figures and reopening it would rewrite the
+        totals the gate relied on. Economic facts (actual cost, funding limit,
+        CPI) are computed inside the same transaction as the status change, so
+        no expense can be recorded between the check and the write.
+        rule.economics.funding_limit_gate vetoes closure when actual cost
+        exceeds the funding limit; rule.economics.cost_variance_alert only
+        records an audit warning.
+      parameters:
+        - name: project_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: phase_key
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [target_status]
+              properties:
+                target_status:
+                  type: string
+                  enum: [active, completed]
+      responses:
+        '200':
+          description: Phase transitioned
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [phase_key, from_status, to_status]
+                properties:
+                  phase_key: { type: string }
+                  from_status: { type: string }
+                  to_status: { type: string }
+        '400': { description: Malformed body }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { description: Phase not found in project }
+        '422': { description: Invalid transition or blocked by a mandatory rule }
 components:
   securitySchemes:
     sessionCookie:
