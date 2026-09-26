@@ -176,6 +176,10 @@ func (s *Store) ReviseWorkProduct(ctx context.Context, actorID, projectID, workP
 		return WorkProductRevision{}, ErrVersionConflict
 	}
 
+	if err := supersedeOpenReviewRequest(ctx, tx, workProductID); err != nil {
+		return WorkProductRevision{}, err
+	}
+
 	_, err = tx.Exec(ctx,
 		`INSERT INTO core.audit_events (actor_user_id, action, scope_type, scope_id, outcome, detail, correlation_id)
 		 VALUES ($1, 'wp.revise', 'project', $2, 'success', $3, $4)`,

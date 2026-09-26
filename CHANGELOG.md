@@ -3,6 +3,18 @@
 Формат ґрунтується на [RELEASE-NOTES-TEMPLATE.md](docs/templates/RELEASE-NOTES-TEMPLATE.md).
 Версії `v0.y.z` не дають гарантій сумісності контрактів (див. [docs/VERSIONING.md §2.1](docs/VERSIONING.md)).
 
+## 1.0.22 — Unreleased
+
+### Додано
+
+- Подання артефакта на рецензію та схема незалежного погодження (CORE-CONTRACT-001, ADR-009).
+  - Міграція `0015_review_and_approval.sql`: `core.review_requests`, `core.review_assignments`, `core.review_decisions`; ролі `project.reviewer` і `project.approver`; права `wp.submit`, `wp.review`, `wp.approve`, `wp.request_changes`; події `wp.submitted_for_review`, `wp.approved`, `wp.changes_requested`.
+  - `project.SubmitWorkProduct`: запит прив'язано до точної пари `(revision_id, payload_hash)`; автор ревізії не може бути призначений рецензентом або погоджувачем.
+  - Нова ревізія скасовує відкритий запит (`superseded`): старі рішення ніколи не переносяться на новий хеш (ADR-009 §3).
+  - `POST /api/v1/projects/{id}/work-products/{wp_id}/submit` під правом `wp.submit`; коди 409/422 за ADR-009 §4.
+  - Інваріанти тримає СУБД, а не код: один відкритий запит на артефакт (частковий унікальний індекс); рішення не може посилатися на чужу ревізію (складений FK); «потрібні зміни» без причини відхиляються (CHECK); одна особа — щонайбільше одне рішення кожного роду (UNIQUE).
+  - Тести: перехід у `in_review` із прив'язкою до останньої ревізії; відмова автору в обох ролях із відкотом до `draft`; повторне подання не створює другого відкритого запиту; подання не-чернетки відхилено; нова ревізія скасовує запит; чотири інваріанти рівня СУБД.
+
 ## 1.0.21 — Unreleased
 
 ### Додано

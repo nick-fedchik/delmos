@@ -8,7 +8,7 @@ CONFIG_DIR    ?= $(PREFIX)/etc/delmos
 WEB_ASSET_DIR := internal/webassets/dist
 PID_FILE      ?= $(BUILD_DIR)/delmos.pid
 
-VERSION       ?= 1.0.21-dev
+VERSION       ?= 1.0.22-dev
 COMMIT        ?= $(shell git rev-parse --short=12 HEAD 2>/dev/null || echo unknown)
 # Час збірки — UTC із дати коміту: локальний час і часовий пояс не потрапляють у бінарник.
 BUILD_DATE    ?= $(shell date -u -d "@$$(git log -1 --format=%ct 2>/dev/null || date +%s)" +%Y-%m-%dT%H:%M:%SZ)

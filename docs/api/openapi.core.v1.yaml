@@ -616,6 +616,60 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { description: Phase not found in project }
         '422': { description: Invalid transition or blocked by a mandatory rule }
+  /projects/{project_id}/work-products/{work_product_id}/submit:
+    post:
+      operationId: submitWorkProduct
+      summary: Submit the latest revision for review (CORE-CONTRACT-001, ADR-009)
+      x-required-permission: wp.submit
+      description: >-
+        Creates a ReviewRequest bound to the exact (revision_id, payload_hash)
+        pair and moves the work product to in_review. Assignees are passed
+        explicitly: a permission grants the ability to act, an assignment
+        defines what it applies to (ADR-009 §1). The author of the revision may
+        not be assigned as reviewer or approver. Committing a new revision
+        supersedes the open request, because decisions are never carried over
+        to a new hash (ADR-009 §3).
+      parameters:
+        - name: project_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: work_product_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [assignments]
+              properties:
+                assignments:
+                  type: array
+                  minItems: 1
+                  items:
+                    type: object
+                    required: [user_id, assignment_role]
+                    properties:
+                      user_id: { type: string, format: uuid }
+                      assignment_role:
+                        type: string
+                        enum: [reviewer, approver]
+      responses:
+        '201':
+          description: Review request created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewRequest'
+        '400': { description: Malformed body or assignment role }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { description: Work product not found }
+        '409': { description: An open review request already exists }
+        '422': { description: Not a draft, no revision, or assignee is the author }
 components:
   securitySchemes:
     sessionCookie:
@@ -841,6 +895,22 @@ components:
         trigger_key: { type: string }
         delivery_attempts: { type: integer }
         last_error: { type: string }
+        created_at: { type: string, format: date-time }
+    ReviewRequest:
+      type: object
+      required: [id, project_id, work_product_id, revision_id, status, requested_by, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        project_id: { type: string, format: uuid }
+        work_product_id: { type: string, format: uuid }
+        revision_id:
+          type: string
+          format: uuid
+          description: The exact revision under review. Never reassigned to a newer one.
+        status:
+          type: string
+          enum: [open, approved, changes_requested, superseded]
+        requested_by: { type: string, format: uuid }
         created_at: { type: string, format: date-time }
     EarnedValueSnapshot:
       type: object
