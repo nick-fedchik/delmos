@@ -531,6 +531,39 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '503': { description: Automation engine not running }
+  /projects/{project_id}/economics/earned-value:
+    get:
+      operationId: getEarnedValue
+      summary: Earned value metrics of the project (ДСТУ ISO 21508, SWR-41)
+      x-required-permission: economics.read
+      description: >-
+        Earned value management metrics per ISO 21508 (ADR-011). Planned value
+        is time-phased linearly across the phase calendar; earned value uses the
+        0/100 rule over approved deliverables linked to the phase (ISO 21511).
+        Monetary values are decimal strings computed in PostgreSQL NUMERIC and
+        are never converted to floating point. Ratio fields are null when the
+        denominator is zero: absence of data must not be read as zero.
+      parameters:
+        - name: project_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: as_of
+          in: query
+          required: false
+          description: Control date (YYYY-MM-DD). Defaults to the current date.
+          schema: { type: string, format: date }
+      responses:
+        '200':
+          description: Earned value snapshot
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EarnedValueSnapshot'
+        '400': { description: Malformed as_of parameter }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: No approved cost baseline for the project }
 components:
   securitySchemes:
     sessionCookie:
@@ -757,6 +790,54 @@ components:
         delivery_attempts: { type: integer }
         last_error: { type: string }
         created_at: { type: string, format: date-time }
+    EarnedValueSnapshot:
+      type: object
+      description: >-
+        Earned value metrics per ДСТУ ISO 21508:2022. Monetary fields are
+        decimal strings, not numbers, so that NUMERIC precision survives JSON
+        transport intact.
+      required: [project_id, as_of, currency, bac, pv, ac, ev, cv, sv, phases]
+      properties:
+        project_id: { type: string, format: uuid }
+        as_of: { type: string, format: date-time }
+        currency: { type: string, minLength: 3, maxLength: 3 }
+        baseline_id: { type: string, format: uuid }
+        baseline_version: { type: integer }
+        bac: { type: string, description: Budget at completion }
+        pv: { type: string, description: Planned value (BCWS) }
+        ac: { type: string, description: Actual cost (ACWP) }
+        ev: { type: string, description: Earned value (BCWP) }
+        cv: { type: string, description: Cost variance, EV minus AC }
+        sv: { type: string, description: Schedule variance, EV minus PV }
+        cpi:
+          type: [string, 'null']
+          description: EV divided by AC. Null when AC is zero (no data, not zero).
+        spi:
+          type: [string, 'null']
+          description: EV divided by PV. Null when PV is zero.
+        eac:
+          type: [string, 'null']
+          description: BAC divided by CPI. Null when nothing has been earned yet.
+        phases:
+          type: array
+          items: { $ref: '#/components/schemas/PhaseEarnedValue' }
+    PhaseEarnedValue:
+      type: object
+      required: [phase_key, name, status, planned_total, funding_limit, pv, ac, ev, over_limit]
+      properties:
+        phase_key: { type: string }
+        name: { type: string }
+        status: { type: string, enum: [not_started, active, completed] }
+        planned_total: { type: string }
+        funding_limit: { type: string }
+        pv: { type: string }
+        ac: { type: string }
+        ev: { type: string }
+        over_limit:
+          type: boolean
+          description: >-
+            Actual cost exceeded the funding limit. Input for
+            rule.economics.funding_limit_gate (SHR-13).
     AutomationStatus:
       type: object
       required: [counts, dead_letters]

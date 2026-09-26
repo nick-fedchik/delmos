@@ -22,6 +22,7 @@ WHERE NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = :'db_name') \gexec
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 CREATE EXTENSION IF NOT EXISTS ltree;
 CREATE EXTENSION IF NOT EXISTS vector;
+CREATE EXTENSION IF NOT EXISTS btree_gist;
 
 -- Робітнича роль не має права змінювати схему (SYSTEM_REQUIREMENTS §3.3).
 REVOKE ALL ON SCHEMA public FROM PUBLIC;

@@ -20,6 +20,7 @@ import (
 	"delmos/internal/auth"
 	"delmos/internal/automation"
 	"delmos/internal/config"
+	"delmos/internal/economics"
 	"delmos/internal/logging"
 	"delmos/internal/migrate"
 	"delmos/internal/pidfile"
@@ -194,6 +195,7 @@ func run() error {
 		Projects:     projects,
 		Repositories: repository.NewStore(pool, repository.NewPlainGitProvider()),
 		Automation:   automationEngine,
+		Economics:    economics.New(pool),
 		LoginLimiter: ratelimit.New(rate.Every(3*time.Second), 5), // 5 спроб одразу, далі 1 на 3 секунди на IP
 		CookieSecure: cfg.Server.CookieSecure,
 		BootStatus:   bootCheck,

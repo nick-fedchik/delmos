@@ -3,6 +3,28 @@
 Формат ґрунтується на [RELEASE-NOTES-TEMPLATE.md](docs/templates/RELEASE-NOTES-TEMPLATE.md).
 Версії `v0.y.z` не дають гарантій сумісності контрактів (див. [docs/VERSIONING.md §2.1](docs/VERSIONING.md)).
 
+## 1.0.20 — Unreleased
+
+### Додано
+
+- Проєктна економіка та облік ресурсів (фаза P5, ADR-006, SHR-13, SWR-39..41).
+  - Міграція `0014_project_economics_resources.sql`: `core.work_records` (табель), `core.working_calendars` + `core.calendar_exceptions`, `core.resource_allocations`, `core.labor_rates`, `core.cost_baselines` + `core.budget_lines`, `core.expense_records`, `core.phase_deliverables`. Усе в схемі `core` за ADR-001 — окремих схем на модуль не заведено.
+  - `internal/economics`: розрахунок показників здобутої цінності за ДСТУ ISO 21508 (PV, AC, EV, CV, SV, CPI, SPI, BAC, EAC). Методи вимірювання задекларовано явно: PV рознесено лінійно за календарем фази, EV — правило 0/100 за затвердженими результатами, привʼязаними до фази (ISO 21511).
+  - Усі грошові обчислення виконує PostgreSQL типом `NUMERIC`; у Go суми передаються рядками. Float не застосовується ніде в економіці.
+  - Індекси (CPI/SPI/EAC) повертаються як `null`, а не нуль, коли знаменник нульовий: відсутність даних не є значенням «нуль» (METRICS.md §6).
+  - `GET /api/v1/projects/{id}/economics/earned-value` з необовʼязковим `as_of` під новим правом `economics.read`, відокремленим від `wp.read`.
+  - Правило `rule.economics.funding_limit_gate` (MANDATORY_VETO) і `rule.economics.cost_variance_alert` (ADVISORY_WARNING, поріг CPI 0.85) на новому тригері `trigger.core.before_phase_transition`.
+  - Предикати `within_funding_limit` і `cpi_above` порівнюють суми через `math/big.Rat`: у float64 `0.1+0.2` дає похибку, і шлюз бюджету хибно спрацьовував би на межі ліміту.
+  - Роль `project.financial_controller` з правом `economics.approve`, відокремленим від `economics.manage` (SoD: хто складає кошторис, той його не затверджує).
+  - Перекриття періодів дії ставок відхиляє СУБД (`EXCLUDE` + `btree_gist`), а не перевірка в коді — інакше дві конкурентні транзакції створили б дві чинні ставки на ту саму дату.
+  - Лише один затверджений кошторис на проєкт (частковий унікальний індекс): інакше BAC був би неоднозначним.
+  - Тести проти реального PostgreSQL: лінійне рознесення PV, AC за історичною ставкою на день роботи, відмова від перекриття ставок, правило 0/100 для EV, позначення перевищення ліміту, заборона списання у завершену фазу, заміщення попереднього кошторису; межові порівняння предикатів на копійку.
+
+### Змінено
+
+- Свідоме відхилення від SPEC-03 §1.1: замість нетипізованого `subject_id` у табелі заведено явний FK на `work_products`. Сутності `WorkItem` у ядрі ще немає, а UUID без FK — діра в цілісності, яку СУБД не контролює.
+- `scripts/sql/bootstrap.sql` і `scripts/sql/test-template.sql`: додано розширення `btree_gist`.
+
 ## 1.0.19 — Unreleased
 
 ### Змінено
