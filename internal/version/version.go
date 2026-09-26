@@ -3,7 +3,7 @@ package version
 
 // Значення Commit і BuildDate підставляються через -ldflags під час збірки (див. Makefile).
 var (
-	Version   = "1.0.26-dev"
+	Version   = "1.0.27-dev"
 	Commit    = "unknown"
 	BuildDate = "unknown"
 )

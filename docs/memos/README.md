@@ -15,6 +15,7 @@
 | [MEMO-003](MEMO-003-graph-rag-architecture-in-postgresql.md) | Архітектура Graph-RAG у PostgreSQL: поєднання векторних ембедінгів та рекурсивних графів | AI-асистування, Семантика, Графи |
 | [MEMO-004](MEMO-004-product-concept-validation-strategy.md) | Стратегія валідації цілісності продуктового задуму | Продуктовий менеджмент, OSS-готовність, Go-to-Market |
 | [MEMO-005](MEMO-005-uml-module-for-structural-and-requirements-modeling.md) | Модуль UML для документування вимог, сутностей, відносин і структур (OMG UML 2.5.1) | Візуалізація, Стандартизація, Interop |
+| [MEMO-006](MEMO-006-architecture-audit-2026-09-26.md) | Архітектурний аудит наскрізного шляху проєкту: план → фаза → економіка → метрики → шлюз | Аудит, Реєстр задач, Цілісність архітектури |
 
 ---
 

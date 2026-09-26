@@ -12,6 +12,9 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+
+	"delmos/internal/automation"
 )
 
 const (
@@ -23,6 +26,10 @@ var (
 	ErrPlanNotFound        = errors.New("план проєкту не знайдено")
 	ErrPlanNotApproved     = errors.New("ревізію плану не погоджено")
 	ErrInvalidPlanManifest = errors.New("некоректний маніфест Generic Project Plan")
+	// ErrPlanPhaseHasActivity: фазу видалено з маніфесту, але в неї вже є записана
+	// економічна активність (RESTRICT на work_records/expense_records) — тихе
+	// видалення звело б частину історії без сліду.
+	ErrPlanPhaseHasActivity = errors.New("фазу неможливо вилучити з плану: вона вже має записану активність")
 )
 
 var planKeyPattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_-]{0,63}$`)
@@ -409,13 +416,14 @@ func (s *Store) ApplyPlan(ctx context.Context, actorID, projectID uuid.UUID, rev
 
 	var wp WorkProduct
 	var currentGen int64
+	var currentEffectiveRevID *uuid.UUID
 	err = tx.QueryRow(ctx,
 		`SELECT wp.id, wp.project_id, wp.code, wp.type, wp.profile, wp.title, wp.status, wp.classification, wp.row_version,
-		        b.config_generation
+		        b.config_generation, b.effective_plan_revision_id
 		 FROM core.project_plan_bindings b
 		 JOIN core.work_products wp ON wp.id = b.plan_work_product_id
 		 WHERE b.project_id = $1 FOR UPDATE`, projectID,
-	).Scan(&wp.ID, &wp.ProjectID, &wp.Code, &wp.Type, &wp.Profile, &wp.Title, &wp.Status, &wp.Classification, &wp.RowVersion, &currentGen)
+	).Scan(&wp.ID, &wp.ProjectID, &wp.Code, &wp.Type, &wp.Profile, &wp.Title, &wp.Status, &wp.Classification, &wp.RowVersion, &currentGen, &currentEffectiveRevID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return PlanApplied{}, ErrPlanNotFound
 	}
@@ -468,6 +476,21 @@ func (s *Store) ApplyPlan(ctx context.Context, actorID, projectID uuid.UUID, rev
 		return PlanApplied{}, fmt.Errorf("%w: ревізія %s", ErrPlanNotApproved, targetRevID)
 	}
 
+	// SWR-46.2: повторне застосування тієї самої ревізії ідемпотентне: без
+	// цього клієнт, що повторив запит після тайм-ауту, отримав би друге
+	// покоління та другий запис у project_plan_applications, хоча чинна конфігурація
+	// не змінилася.
+	if currentEffectiveRevID != nil && *currentEffectiveRevID == targetRevID {
+		if err := tx.Commit(ctx); err != nil {
+			return PlanApplied{}, fmt.Errorf("фіксація повторного застосування плану: %w", err)
+		}
+		return PlanApplied{
+			EffectivePlanRevisionID: targetRevID,
+			ConfigGeneration:        currentGen,
+			RowVersion:              wp.RowVersion,
+		}, nil
+	}
+
 	newGeneration := currentGen + 1
 	if _, err := tx.Exec(ctx,
 		`UPDATE core.project_plan_bindings
@@ -513,6 +536,19 @@ func (s *Store) ApplyPlan(ctx context.Context, actorID, projectID uuid.UUID, rev
 		}
 	}
 
+	// Нова ревізія може вилучити фазу: без цього видалена з маніфесту фаза
+	// лишалася б у проєкції назавжди (CORE-CONTRACT-002 §5). Фаза з уже
+	// записаною активністю не видаляється мовчки: RESTRICT на work_records/
+	// expense_records перетворюється в ясний конфлікт, а не опакуву помилку СУБД.
+	if _, err := tx.Exec(ctx,
+		`DELETE FROM core.project_phases WHERE project_id = $1 AND NOT (phase_key = ANY($2))`,
+		projectID, phaseKeys(manifest.Phases)); err != nil {
+		if isForeignKeyViolation(err) {
+			return PlanApplied{}, ErrPlanPhaseHasActivity
+		}
+		return PlanApplied{}, fmt.Errorf("вилучення застарілих фаз: %w", err)
+	}
+
 	// Проєкція віх у core.project_milestones
 	for _, ms := range manifest.Milestones {
 		var targetVal *string
@@ -543,6 +579,12 @@ func (s *Store) ApplyPlan(ctx context.Context, actorID, projectID uuid.UUID, rev
 		}
 	}
 
+	if _, err := tx.Exec(ctx,
+		`DELETE FROM core.project_milestones WHERE project_id = $1 AND NOT (milestone_key = ANY($2))`,
+		projectID, milestoneKeys(manifest.Milestones)); err != nil {
+		return PlanApplied{}, fmt.Errorf("вилучення застарілих віх: %w", err)
+	}
+
 	if tag, err := tx.Exec(ctx,
 		`UPDATE core.work_products SET row_version = row_version + 1 WHERE id = $1 AND row_version = $2`,
 		wp.ID, expectedRowVersion); err != nil || tag.RowsAffected() == 0 {
@@ -550,6 +592,16 @@ func (s *Store) ApplyPlan(ctx context.Context, actorID, projectID uuid.UUID, rev
 	}
 
 	if err := s.recordProjectAuditTx(ctx, tx, actorID, projectID, "plan.apply", map[string]any{
+		"revision_id":       targetRevID.String(),
+		"revision_number":   targetRevNum,
+		"config_generation": newGeneration,
+	}); err != nil {
+		return PlanApplied{}, err
+	}
+
+	// CORE-CONTRACT-003 §5: комітована подія plan.applied — без неї жоден споживач
+	// виобоку (наприклад, реєстр метрик) не дізнається про нову чинну конфігурацію.
+	if err := automation.EmitEvent(ctx, tx, "plan.applied", &projectID, &actorID, uuid.New(), map[string]any{
 		"revision_id":       targetRevID.String(),
 		"revision_number":   targetRevNum,
 		"config_generation": newGeneration,
@@ -659,6 +711,17 @@ func milestoneKeys(items []PlanMilestone) []string {
 		keys[i] = items[i].Key
 	}
 	return keys
+}
+
+// isForeignKeyViolation розпізнає і 23503 (звичайне порушення FK), і 23001
+// (restrict_violation — саме цей код PostgreSQL повертає на ON DELETE
+// RESTRICT, а не 23503).
+func isForeignKeyViolation(err error) bool {
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) {
+		return false
+	}
+	return pgErr.Code == "23503" || pgErr.Code == "23001"
 }
 func acceptanceRuleKeys(items []AcceptanceRule) []string {
 	keys := make([]string, len(items))

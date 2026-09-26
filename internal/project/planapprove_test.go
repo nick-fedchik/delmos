@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
+	"delmos/internal/economics"
 	"delmos/internal/project"
 )
 
@@ -213,4 +215,151 @@ func (f *planFixture) revisePlan(t *testing.T, body string) uuid.UUID {
 		t.Fatalf("маніфест нової ревізії: %v", err)
 	}
 	return revisionID
+}
+
+// reviseManifest створює нову ревізію плану з довільним маніфестом — на
+// відміну від revisePlan, який лише копіює попередній вміст.
+func (f *planFixture) reviseManifest(t *testing.T, label string, manifest project.GenericPlanManifest) uuid.UUID {
+	t.Helper()
+	ctx := context.Background()
+	body := "revision: " + label
+
+	var revisionID uuid.UUID
+	if err := f.pool.QueryRow(ctx,
+		`INSERT INTO core.work_product_revisions
+		   (work_product_id, revision_number, body, metadata, payload_hash, content_hash, created_by)
+		 VALUES ($1,
+		         COALESCE((SELECT max(revision_number) FROM core.work_product_revisions WHERE work_product_id = $1), 0) + 1,
+		         $2::text, '{}'::jsonb,
+		         sha256(convert_to($2::text, 'UTF8')), sha256(convert_to($2::text, 'UTF8')), $3)
+		 RETURNING id`, f.planWorkProductID, body, f.actor).Scan(&revisionID); err != nil {
+		t.Fatalf("створення ревізії плану: %v", err)
+	}
+	if _, err := f.pool.Exec(ctx,
+		`INSERT INTO core.project_plan_manifests (revision_id, template_key, template_version, manifest, manifest_hash)
+		 VALUES ($1, 'generic-project-plan', 1, $2, sha256(convert_to($3::text, 'UTF8')))`,
+		revisionID, manifest, body); err != nil {
+		t.Fatalf("маніфест нової ревізії: %v", err)
+	}
+	// Обхід прямим SQL не проходить через ReviseWorkProduct — повертаємо
+	// статус у draft вручну, як це робить сама команда (PROJECT_MODEL.md §4).
+	if _, err := f.pool.Exec(ctx,
+		`UPDATE core.work_products SET status = 'draft' WHERE id = $1`, f.planWorkProductID); err != nil {
+		t.Fatalf("повернення плану в draft: %v", err)
+	}
+	return revisionID
+}
+
+// planWithPhase будує мінімальний валідний маніфест із однією фазою або
+// зовсім без фаз.
+func planWithPhase(name, phaseKey string) project.GenericPlanManifest {
+	manifest := project.DefaultGenericPlanManifest(name)
+	if phaseKey != "" {
+		manifest.Phases = []project.PlanPhase{{
+			Key: phaseKey, Name: phaseKey,
+			PlannedStart: "2026-01-01", PlannedFinish: "2026-01-31",
+		}}
+	}
+	return manifest
+}
+
+func (f *phaseFixture) hasPhase(t *testing.T, phaseKey string) bool {
+	t.Helper()
+	var exists bool
+	if err := f.pool.QueryRow(context.Background(),
+		`SELECT EXISTS (SELECT 1 FROM core.project_phases WHERE project_id = $1 AND phase_key = $2)`,
+		f.projectID, phaseKey).Scan(&exists); err != nil {
+		t.Fatalf("перевірка наявності фази %s: %v", phaseKey, err)
+	}
+	return exists
+}
+
+// SWR-46.2: повторне застосування тієї самої ревізії не має підвищувати покоління
+// чи дублювати факт застосування.
+func TestApplyPlanSameRevisionIsIdempotent(t *testing.T) {
+	f := newPlanFixture(t)
+	f.approveLatestPlanRevision(t)
+
+	first, err := f.projects.ApplyPlan(context.Background(), f.actor, f.projectID, nil, f.planRowVersion)
+	if err != nil {
+		t.Fatalf("перше застосування: %v", err)
+	}
+	f.refreshPlanRowVersion(t)
+
+	second, err := f.projects.ApplyPlan(context.Background(), f.actor, f.projectID, nil, f.planRowVersion)
+	if err != nil {
+		t.Fatalf("повторне застосування тієї самої ревізії має проходити ідемпотентно: %v", err)
+	}
+	if second.ConfigGeneration != first.ConfigGeneration {
+		t.Errorf("покоління конфігурації = %d, очікувано незмінне %d", second.ConfigGeneration, first.ConfigGeneration)
+	}
+
+	var applications int
+	if err := f.pool.QueryRow(context.Background(),
+		`SELECT count(*) FROM core.project_plan_applications WHERE project_id = $1`, f.projectID).
+		Scan(&applications); err != nil {
+		t.Fatalf("підрахунок застосувань: %v", err)
+	}
+	if applications != 1 {
+		t.Errorf("застосувань = %d, очікувано 1 — повтор не мав створити другий запис", applications)
+	}
+}
+
+// CORE-CONTRACT-002 §5: фаза, видалена з маніфесту, має зникати з проєкції після
+// наступного застосування, а не лишатись у ній назавжди.
+func TestApplyPlanPrunesDroppedPhase(t *testing.T) {
+	f := newPlanFixture(t)
+	f.reviseManifest(t, "with-phase", planWithPhase("Шлюз плану", "alpha"))
+	f.approveLatestPlanRevision(t)
+	if _, err := f.projects.ApplyPlan(context.Background(), f.actor, f.projectID, nil, f.planRowVersion); err != nil {
+		t.Fatalf("застосування плану з фазою: %v", err)
+	}
+	f.refreshPlanRowVersion(t)
+	if !f.hasPhase(t, "alpha") {
+		t.Fatal("фазу alpha мало бути спроєктовано")
+	}
+
+	f.reviseManifest(t, "without-phase", planWithPhase("Шлюз плану", ""))
+	f.approveLatestPlanRevision(t)
+	if _, err := f.projects.ApplyPlan(context.Background(), f.actor, f.projectID, nil, f.planRowVersion); err != nil {
+		t.Fatalf("застосування плану без фази: %v", err)
+	}
+
+	if f.hasPhase(t, "alpha") {
+		t.Error("фазу alpha мало бути вилучено після зникнення з маніфесту")
+	}
+}
+
+// Фаза з уже записаною активністю не зникає мовчки: RESTRICT на work_records
+// перетворюється в ясний конфлікт, а транзакція застосування відкочується.
+func TestApplyPlanRejectsRemovingPhaseWithRecordedActivity(t *testing.T) {
+	f := newPlanFixture(t)
+	f.reviseManifest(t, "with-phase", planWithPhase("Шлюз плану", "alpha"))
+	f.approveLatestPlanRevision(t)
+	if _, err := f.projects.ApplyPlan(context.Background(), f.actor, f.projectID, nil, f.planRowVersion); err != nil {
+		t.Fatalf("застосування плану з фазою: %v", err)
+	}
+	f.refreshPlanRowVersion(t)
+
+	if _, err := f.projects.TransitionPhase(context.Background(), f.actor, f.projectID, "alpha", "active",
+		time.Date(2026, 1, 10, 0, 0, 0, 0, time.UTC)); err != nil {
+		t.Fatalf("активація фази alpha: %v", err)
+	}
+	if _, err := f.econ.LogWorkRecord(context.Background(), economics.WorkRecord{
+		ProjectID: f.projectID, UserID: f.actor, PhaseKey: "alpha", RoleKey: "engineer",
+		WorkDate: time.Date(2026, 1, 10, 0, 0, 0, 0, time.UTC), DurationHours: "4.00", WorkCategory: "design",
+	}); err != nil {
+		t.Fatalf("списання трудовитрат: %v", err)
+	}
+
+	f.reviseManifest(t, "without-phase", planWithPhase("Шлюз плану", ""))
+	f.approveLatestPlanRevision(t)
+
+	_, err := f.projects.ApplyPlan(context.Background(), f.actor, f.projectID, nil, f.planRowVersion)
+	if !errors.Is(err, project.ErrPlanPhaseHasActivity) {
+		t.Fatalf("очікувано ErrPlanPhaseHasActivity, отримано %v", err)
+	}
+	if !f.hasPhase(t, "alpha") {
+		t.Error("фаза alpha мала лишитися — транзакція мала відкотитися")
+	}
 }

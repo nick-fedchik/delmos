@@ -89,6 +89,16 @@ func (f *phaseFixture) phase(t *testing.T, key, status string) {
 	}
 }
 
+// setDependsOn позначає фазу як залежну від переданого переліку інших фаз.
+func (f *phaseFixture) setDependsOn(t *testing.T, phaseKey string, deps []string) {
+	t.Helper()
+	if _, err := f.pool.Exec(context.Background(),
+		`UPDATE core.project_phases SET depends_on = $1 WHERE project_id = $2 AND phase_key = $3`,
+		deps, f.projectID, phaseKey); err != nil {
+		t.Fatalf("встановлення залежності фази %s: %v", phaseKey, err)
+	}
+}
+
 func (f *phaseFixture) approvedBaseline(t *testing.T) {
 	t.Helper()
 	ctx := context.Background()
@@ -343,5 +353,38 @@ func TestPhaseTransitionUnknownPhase(t *testing.T) {
 		f.actor, f.projectID, "no-such-phase", "active", gateAsOf)
 	if !errors.Is(err, project.ErrPhaseNotFound) {
 		t.Errorf("очікувано ErrPhaseNotFound, отримано %v", err)
+	}
+}
+
+// CORE-CONTRACT-002 §4.1: фаза не відкривається, доки залежна фаза не
+// завершена — без цієї перевірки граф фаз існував би лише в маніфесті плану,
+// а не в реальному виконанні.
+func TestPhaseActivationBlockedByUnmetDependency(t *testing.T) {
+	f := newPhaseFixture(t)
+	f.phase(t, "requirements", "not_started")
+	f.setDependsOn(t, gatePhase, []string{"requirements"})
+
+	_, err := f.projects.TransitionPhase(context.Background(),
+		f.actor, f.projectID, gatePhase, "active", gateAsOf)
+	if !errors.Is(err, project.ErrPhaseDependencyNotMet) {
+		t.Fatalf("очікувано ErrPhaseDependencyNotMet, отримано %v", err)
+	}
+	if got := f.status(t); got != "not_started" {
+		t.Errorf("статус фази = %q, очікувано not_started — активація мала бути заблокована", got)
+	}
+}
+
+// Дзеркальний випадок: завершена залежність знімає блокування.
+func TestPhaseActivationAllowedAfterDependencyCompleted(t *testing.T) {
+	f := newPhaseFixture(t)
+	f.phase(t, "requirements", "completed")
+	f.setDependsOn(t, gatePhase, []string{"requirements"})
+
+	if _, err := f.projects.TransitionPhase(context.Background(),
+		f.actor, f.projectID, gatePhase, "active", gateAsOf); err != nil {
+		t.Fatalf("активація після завершення залежності має проходити: %v", err)
+	}
+	if got := f.status(t); got != "active" {
+		t.Errorf("статус фази = %q, очікувано active", got)
 	}
 }

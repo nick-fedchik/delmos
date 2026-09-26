@@ -166,8 +166,12 @@ func (s *Store) ReviseWorkProduct(ctx context.Context, actorID, projectID, workP
 		return WorkProductRevision{}, fmt.Errorf("створення ревізії: %w", err)
 	}
 
+	// Нова ревізія повертає артефакт у draft (PROJECT_MODEL.md §4: Approved/
+	// InReview --> Draft: plan.revise) — інакше SubmitWorkProduct назавжди
+	// відмовляв би артефакту, який уже раз затвердили.
 	tag, err := tx.Exec(ctx,
-		`UPDATE core.work_products SET row_version = row_version + 1 WHERE id = $1 AND row_version = $2`,
+		`UPDATE core.work_products SET row_version = row_version + 1, status = 'draft'
+		 WHERE id = $1 AND row_version = $2`,
 		workProductID, expectedRowVersion)
 	if err != nil {
 		return WorkProductRevision{}, fmt.Errorf("оновлення row_version work product: %w", err)

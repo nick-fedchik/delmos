@@ -46,6 +46,8 @@ func handleTransitionPhase(authSvc *auth.Service, projects *project.Store) http.
 			writeJSONError(w, http.StatusNotFound, "phase_not_found", "фазу не знайдено в проєкті")
 		case errors.Is(err, project.ErrPhaseTransitionInvalid):
 			writeJSONError(w, http.StatusUnprocessableEntity, "invalid_transition", err.Error())
+		case errors.Is(err, project.ErrPhaseDependencyNotMet):
+			writeJSONError(w, http.StatusUnprocessableEntity, "dependency_not_met", err.Error())
 		case errors.Is(err, project.ErrPhaseGateRejected):
 			writeJSONError(w, http.StatusUnprocessableEntity, "gate_rejected", err.Error())
 		default:

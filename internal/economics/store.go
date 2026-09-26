@@ -21,6 +21,10 @@ var (
 	ErrPhaseNotOpen       = errors.New("списання дозволене лише у відкритій фазі")
 	ErrDuplicateApproved  = errors.New("у проєкті вже є затверджений кошторис")
 	ErrUnknownCostategory = errors.New("невідома категорія витрат")
+	// ErrCurrencyMismatch: AC підсумовує трудовитрати й витрати без конвертації
+	// (evm.go, phaseActualCostSQL). Витрата в іншій валюті, ніж кошторис, тихо
+	// змішала б дві різні валюти як одне число.
+	ErrCurrencyMismatch = errors.New("валюта витрати не відповідає валюті затвердженого кошторису")
 )
 
 type WorkRecord struct {
@@ -40,8 +44,16 @@ type WorkRecord struct {
 // emitInputsChanged сповіщає про зміну вхідних даних здобутої цінності.
 // Подія записується в тій самій транзакції, що й сама зміна: інакше збій
 // після фіксації запису лишив би показники назавжди розбіжними з даними.
+//
+// actorID може бути uuid.Nil (наприклад, для загальносистемної ставки без
+// одного проєкту): тоді в конверт потрапляє відсутній актор, а не
+// вигаданий нульовий UUID.
 func emitInputsChanged(ctx context.Context, tx pgx.Tx, projectID, actorID uuid.UUID, reason string) error {
-	return automation.EmitEvent(ctx, tx, "economics.inputs_changed", &projectID, &actorID, uuid.New(),
+	var actor *uuid.UUID
+	if actorID != uuid.Nil {
+		actor = &actorID
+	}
+	return automation.EmitEvent(ctx, tx, "economics.inputs_changed", &projectID, actor, uuid.New(),
 		map[string]any{"reason": reason})
 }
 
@@ -98,8 +110,14 @@ func (s *Store) LogWorkRecord(ctx context.Context, rec WorkRecord) (WorkRecord, 
 // (EXCLUDE-констрейнт), а не перевірка в коді — інакше дві конкурентні
 // транзакції створили б дві чинні ставки на ту саму дату.
 func (s *Store) SetLaborRate(ctx context.Context, projectID *uuid.UUID, roleKey, hourlyRate, currency string, validFrom time.Time, validTo *time.Time) (uuid.UUID, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("відкриття транзакції ставки: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
 	var id uuid.UUID
-	err := s.pool.QueryRow(ctx,
+	err = tx.QueryRow(ctx,
 		`INSERT INTO core.labor_rates (project_id, role_key, hourly_rate, currency, valid_from, valid_to)
 		 VALUES ($1, $2, $3::numeric, $4, $5, $6) RETURNING id`,
 		projectID, roleKey, hourlyRate, currency, validFrom, validTo).Scan(&id)
@@ -109,6 +127,19 @@ func (s *Store) SetLaborRate(ctx context.Context, projectID *uuid.UUID, roleKey,
 			return uuid.Nil, ErrRatePeriodOverlap
 		}
 		return uuid.Nil, fmt.Errorf("запис ставки: %w", err)
+	}
+
+	// Ставка проєктного рівня впливає на AC цього проєкту й має відразу
+	// запустити перерахунок: без цього вимірювання AC/CPI лишалося б valid
+	// з уже чинними вхідними даними. Загальносистемна ставка (projectID == nil)
+	// не має одного проєкту для точкового перерахунку тут.
+	if projectID != nil {
+		if err := emitInputsChanged(ctx, tx, *projectID, uuid.Nil, "labor_rate"); err != nil {
+			return uuid.Nil, err
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return uuid.Nil, fmt.Errorf("фіксація ставки: %w", err)
 	}
 	return id, nil
 }
@@ -214,13 +245,40 @@ func (s *Store) ApproveCostBaseline(ctx context.Context, baselineID, approverID 
 	return tx.Commit(ctx)
 }
 
-// RecordExpense фіксує нетрудову витрату (SWR-40.4).
+// RecordExpense фіксує нетрудову витрату (SWR-40.4). Списання дозволене лише
+// у відкритій фазі й лише у валюті затвердженого кошторису — інакше AC склав би
+// суми в різних валютах як єдине число (evm.go, phaseActualCostSQL не конвертує).
 func (s *Store) RecordExpense(ctx context.Context, projectID, actorID uuid.UUID, phaseKey, category, expenseType, amount, currency, invoiceRef string, expenseDate time.Time) (uuid.UUID, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return uuid.Nil, fmt.Errorf("відкриття транзакції витрати: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+
+	var phaseStatus string
+	err = tx.QueryRow(ctx,
+		`SELECT status FROM core.project_phases WHERE project_id = $1 AND phase_key = $2`,
+		projectID, phaseKey).Scan(&phaseStatus)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return uuid.Nil, ErrPhaseNotFound
+	}
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("читання фази: %w", err)
+	}
+	if phaseStatus != "active" {
+		return uuid.Nil, fmt.Errorf("%w: фаза %q має статус %q", ErrPhaseNotOpen, phaseKey, phaseStatus)
+	}
+
+	var baselineCurrency string
+	err = tx.QueryRow(ctx,
+		`SELECT currency FROM core.cost_baselines WHERE project_id = $1 AND status = 'approved'`,
+		projectID).Scan(&baselineCurrency)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return uuid.Nil, fmt.Errorf("читання валюти кошторису: %w", err)
+	}
+	if err == nil && baselineCurrency != currency {
+		return uuid.Nil, fmt.Errorf("%w: витрата в %q, кошторис у %q", ErrCurrencyMismatch, currency, baselineCurrency)
+	}
 
 	var id uuid.UUID
 	err = tx.QueryRow(ctx,

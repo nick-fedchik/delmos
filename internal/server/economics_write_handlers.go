@@ -199,11 +199,18 @@ func handleRecordExpense(authSvc *auth.Service, store *economics.Store) http.Han
 		}
 		id, err := store.RecordExpense(r.Context(), projectID, actor, req.PhaseKey,
 			req.CostCategory, req.ExpenseType, req.Amount, req.Currency, req.InvoiceReference, expenseDate)
-		if err != nil {
+		switch {
+		case err == nil:
+			writeJSON(w, http.StatusCreated, map[string]string{"id": id.String()})
+		case errors.Is(err, economics.ErrPhaseNotFound):
+			writeJSONError(w, http.StatusNotFound, "phase_not_found", "фазу не знайдено в проєкті")
+		case errors.Is(err, economics.ErrPhaseNotOpen):
+			writeJSONError(w, http.StatusUnprocessableEntity, "phase_not_open", err.Error())
+		case errors.Is(err, economics.ErrCurrencyMismatch):
+			writeJSONError(w, http.StatusUnprocessableEntity, "currency_mismatch", err.Error())
+		default:
 			writeJSONError(w, http.StatusUnprocessableEntity, "invalid_expense", err.Error())
-			return
 		}
-		writeJSON(w, http.StatusCreated, map[string]string{"id": id.String()})
 	}
 }
 

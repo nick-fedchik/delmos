@@ -2,6 +2,7 @@ package economics
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"testing"
@@ -254,6 +255,43 @@ func TestWorkRecordRejectedForClosedPhase(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("очікувалась відмова списання у завершену фазу")
+	}
+}
+
+// Дзеркальна вимога до трудовитрат: витрата теж не потрапляє у завершену
+// фазу заднім числом.
+func TestExpenseRejectedForClosedPhase(t *testing.T) {
+	f := newFixture(t)
+	f.createPhase(t, "closed", "Завершена", "completed")
+
+	_, err := f.store.RecordExpense(context.Background(), f.project, f.author, "closed",
+		"hardware_prototypes", "capex", "500.00", "EUR", "INV-9", date(2026, 1, 5))
+	if !errors.Is(err, ErrPhaseNotOpen) {
+		t.Fatalf("очікувано ErrPhaseNotOpen, отримано %v", err)
+	}
+}
+
+// AC підсумовує трудовитрати й витрати без конвертації валют (phaseActualCostSQL):
+// витрата в чужій валюті мовчки спотворила б суму.
+func TestExpenseRejectedForCurrencyMismatch(t *testing.T) {
+	f := newFixture(t)
+	f.approvedBaseline(t) // валюта кошторису — EUR
+
+	_, err := f.store.RecordExpense(context.Background(), f.project, f.author, "design",
+		"hardware_prototypes", "capex", "500.00", "USD", "INV-9", date(2026, 1, 5))
+	if !errors.Is(err, ErrCurrencyMismatch) {
+		t.Fatalf("очікувано ErrCurrencyMismatch, отримано %v", err)
+	}
+}
+
+// Без затвердженого кошторису валюти порівнювати нема з чим — перевіряти
+// нічого, запис має пройти.
+func TestExpenseAllowedInAnyCurrencyWithoutApprovedBaseline(t *testing.T) {
+	f := newFixture(t)
+
+	if _, err := f.store.RecordExpense(context.Background(), f.project, f.author, "design",
+		"hardware_prototypes", "capex", "500.00", "USD", "INV-9", date(2026, 1, 5)); err != nil {
+		t.Fatalf("без кошторису запис має проходити: %v", err)
 	}
 }
 

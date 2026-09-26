@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -18,6 +19,9 @@ var (
 	ErrPhaseNotFound          = errors.New("фазу не знайдено в проєкті")
 	ErrPhaseTransitionInvalid = errors.New("неприпустимий перехід статусу фази")
 	ErrPhaseGateRejected      = errors.New("перехід заблоковано обов'язковим правилом")
+	// ErrPhaseDependencyNotMet: CORE-CONTRACT-002 §4.1 — фаза не відкривається,
+	// доки всі залежні від неї фази не завершені.
+	ErrPhaseDependencyNotMet = errors.New("залежна фаза ще не завершена")
 )
 
 // allowedPhaseTransitions — життєвий цикл фази (PROJECT_PLAN_ENGINE.md).
@@ -65,6 +69,20 @@ func (s *Store) TransitionPhase(ctx context.Context, actorID, projectID uuid.UUI
 
 	if !phaseTransitionAllowed(currentStatus, targetStatus) {
 		return PhaseTransitionResult{}, fmt.Errorf("%w: %s -> %s", ErrPhaseTransitionInvalid, currentStatus, targetStatus)
+	}
+
+	// CORE-CONTRACT-002 §4.1: фаза не відкривається, доки всі її залежності не
+	// завершені. Перевіряється в тій самій транзакції під блокуванням
+	// рядка фази, щоб залежна фаза не завершилася паралельно між перевіркою та
+	// встановленням статусу.
+	if targetStatus == "active" {
+		blocked, err := unmetDependencies(ctx, tx, projectID, phaseKey)
+		if err != nil {
+			return PhaseTransitionResult{}, err
+		}
+		if len(blocked) > 0 {
+			return PhaseTransitionResult{}, fmt.Errorf("%w: %s", ErrPhaseDependencyNotMet, strings.Join(blocked, ", "))
+		}
 	}
 
 	facts, err := economics.PhaseGateFacts(ctx, tx, projectID, phaseKey, asOf)
@@ -131,4 +149,35 @@ func phaseTransitionAllowed(from, to string) bool {
 		}
 	}
 	return false
+}
+
+// unmetDependencies повертає ключі фаз із depends_on поточної фази, що ще не
+// завершені.
+func unmetDependencies(ctx context.Context, tx pgx.Tx, projectID uuid.UUID, phaseKey string) ([]string, error) {
+	rows, err := tx.Query(ctx,
+		`SELECT dep.phase_key
+		 FROM core.project_phases ph
+		 CROSS JOIN LATERAL unnest(ph.depends_on) AS dep_key
+		 JOIN core.project_phases dep
+		   ON dep.project_id = ph.project_id AND dep.phase_key = dep_key
+		 WHERE ph.project_id = $1 AND ph.phase_key = $2 AND dep.status <> 'completed'
+		 ORDER BY dep.phase_key`,
+		projectID, phaseKey)
+	if err != nil {
+		return nil, fmt.Errorf("перевірка залежностей фази %s: %w", phaseKey, err)
+	}
+	defer rows.Close()
+
+	var blocked []string
+	for rows.Next() {
+		var key string
+		if err := rows.Scan(&key); err != nil {
+			return nil, fmt.Errorf("розбір залежності фази %s: %w", phaseKey, err)
+		}
+		blocked = append(blocked, key)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("обхід залежностей фази %s: %w", phaseKey, err)
+	}
+	return blocked, nil
 }
