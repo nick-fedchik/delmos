@@ -84,6 +84,10 @@ func (s *Store) CreateWorkProduct(ctx context.Context, actorID, projectID uuid.U
 		return WorkProduct{}, WorkProductRevision{}, fmt.Errorf("запис аудиторської події створення work product: %w", err)
 	}
 
+	if err := upsertEmbedding(ctx, tx, wpType, wp.ID, revision.ID, title, body); err != nil {
+		return WorkProduct{}, WorkProductRevision{}, err
+	}
+
 	if err := tx.Commit(ctx); err != nil {
 		return WorkProduct{}, WorkProductRevision{}, fmt.Errorf("фіксація створення work product: %w", err)
 	}
@@ -156,13 +160,24 @@ func (s *Store) ReviseWorkProduct(ctx context.Context, actorID, projectID, workP
 		return WorkProductRevision{}, ErrVersionConflict
 	}
 
+	// GRP-03 Change Impact Analysis: нова ревізія позначає підозрілими всі
+	// ребра графа, що прямо чи опосередковано спираються на цей артефакт.
+	suspectCount, err := propagateSuspect(ctx, tx, projectID, workProductID)
+	if err != nil {
+		return WorkProductRevision{}, err
+	}
+
 	correlationID := uuid.New()
 	_, err = tx.Exec(ctx,
 		`INSERT INTO core.audit_events (actor_user_id, action, scope_type, scope_id, outcome, detail, correlation_id)
 		 VALUES ($1, 'wp.revise', 'project', $2, 'success', $3, $4)`,
-		actorID, projectID, map[string]any{"work_product_id": workProductID.String(), "revision_number": revision.RevisionNumber}, correlationID)
+		actorID, projectID, map[string]any{"work_product_id": workProductID.String(), "revision_number": revision.RevisionNumber, "suspect_links_marked": suspectCount}, correlationID)
 	if err != nil {
 		return WorkProductRevision{}, fmt.Errorf("запис аудиторської події ревізії: %w", err)
+	}
+
+	if err := upsertEmbedding(ctx, tx, wp.Type, workProductID, revision.ID, wp.Title, body); err != nil {
+		return WorkProductRevision{}, err
 	}
 
 	if err := tx.Commit(ctx); err != nil {

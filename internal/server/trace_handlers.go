@@ -107,3 +107,51 @@ func handleTraverseTraceability(authSvc *auth.Service, projects *project.Store) 
 		writeJSON(w, http.StatusOK, views)
 	}
 }
+
+// handleListTraceLinks повертає реєстр зв'язків проєкту — аудиторський список
+// перегляду для Change Impact Analysis (GRP-03). ?suspect=true фільтрує лише
+// підозрілі зв'язки, що очікують підтвердження рецензентом.
+func handleListTraceLinks(authSvc *auth.Service, projects *project.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		_, projectID, ok := projectScopePermission(w, r, authSvc, "wp.read")
+		if !ok {
+			return
+		}
+		onlySuspect := r.URL.Query().Get("suspect") == "true"
+		links, err := projects.ListTraceLinks(r.Context(), projectID, onlySuspect)
+		if err != nil {
+			writeJSONError(w, http.StatusInternalServerError, "internal_error", "не вдалося прочитати зв'язки простежуваності")
+			return
+		}
+		views := make([]traceLinkView, 0, len(links))
+		for _, link := range links {
+			views = append(views, toTraceLinkView(link))
+		}
+		writeJSON(w, http.StatusOK, views)
+	}
+}
+
+// handleAcknowledgeTraceLink знімає прапорець is_suspect за явною дією
+// рецензента після підтвердження відповідності (VECTOR_AND_GRAPH_DATA.md §3.3).
+func handleAcknowledgeTraceLink(authSvc *auth.Service, projects *project.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		actorID, projectID, ok := projectScopePermission(w, r, authSvc, "trace.create")
+		if !ok {
+			return
+		}
+		linkID, err := uuid.Parse(r.PathValue("trace_link_id"))
+		if err != nil {
+			writeJSONError(w, http.StatusNotFound, "not_found", "зв'язок простежуваності не знайдено")
+			return
+		}
+		if err := projects.AcknowledgeTraceLink(r.Context(), actorID, projectID, linkID); err != nil {
+			if errors.Is(err, project.ErrTraceLinkNotFound) {
+				writeJSONError(w, http.StatusNotFound, "not_found", "зв'язок простежуваності не знайдено")
+				return
+			}
+			writeJSONError(w, http.StatusInternalServerError, "internal_error", "не вдалося зняти прапорець підозрілості")
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}
+}

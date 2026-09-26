@@ -166,3 +166,92 @@ func (s *Store) TraverseTraceability(ctx context.Context, projectID, sourceID uu
 	}
 	return entries, rows.Err()
 }
+
+// propagateSuspectOnRevision позначає is_suspect=true на всіх ребрах графа, що
+// прямо чи опосередковано посилаються на workProductID як на ціль (target) —
+// саме так у trace_links кодується залежність "джерело спирається на ціль"
+// (verifies/satisfies/refines/derives_from). Виконується в тій самій
+// транзакції, що й фіксація нової ревізії (GRP-03, Change Impact Analysis):
+// зміна артефакту не робить залежні артефакти невалідними автоматично, лише
+// формує список для перегляду інженером; зняття прапорця — окрема явна дія
+// рецензента (AcknowledgeTraceLink).
+func propagateSuspect(ctx context.Context, tx pgx.Tx, projectID, workProductID uuid.UUID) (int, error) {
+	tag, err := tx.Exec(ctx, `
+		WITH RECURSIVE impact AS (
+			SELECT tl.id, tl.source_id, ARRAY[tl.target_id] AS path, false AS is_cycle
+			FROM core.trace_links tl
+			WHERE tl.project_id = $1 AND tl.target_id = $2
+			UNION ALL
+			SELECT child.id, child.source_id, parent.path || child.target_id,
+			       child.target_id = ANY(parent.path)
+			FROM core.trace_links child
+			JOIN impact parent ON child.target_id = parent.source_id
+			WHERE child.project_id = $1 AND array_length(parent.path, 1) < 100 AND NOT parent.is_cycle
+		)
+		UPDATE core.trace_links
+		SET is_suspect = true
+		WHERE project_id = $1 AND id IN (SELECT id FROM impact)`,
+		projectID, workProductID)
+	if err != nil {
+		return 0, fmt.Errorf("поширення прапорця is_suspect: %w", err)
+	}
+	return int(tag.RowsAffected()), nil
+}
+
+// ListTraceLinks повертає всі зв'язки простежуваності проєкту (найновіші
+// перші), опційно лише підозрілі — аудиторський список перегляду з GRP-03.
+func (s *Store) ListTraceLinks(ctx context.Context, projectID uuid.UUID, onlySuspect bool) ([]TraceLink, error) {
+	query := `SELECT id, project_id, source_id, source_revision_id, target_id, target_revision_id, relation_kind, is_suspect
+	          FROM core.trace_links WHERE project_id = $1`
+	if onlySuspect {
+		query += ` AND is_suspect`
+	}
+	query += ` ORDER BY created_at DESC`
+
+	rows, err := s.pool.Query(ctx, query, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("читання зв'язків простежуваності: %w", err)
+	}
+	defer rows.Close()
+
+	var links []TraceLink
+	for rows.Next() {
+		var link TraceLink
+		if err := rows.Scan(&link.ID, &link.ProjectID, &link.SourceID, &link.SourceRevisionID,
+			&link.TargetID, &link.TargetRevisionID, &link.RelationKind, &link.IsSuspect); err != nil {
+			return nil, fmt.Errorf("розбір зв'язку простежуваності: %w", err)
+		}
+		links = append(links, link)
+	}
+	return links, rows.Err()
+}
+
+// AcknowledgeTraceLink знімає прапорець is_suspect за явною дією рецензента
+// після підтвердження відповідності (VECTOR_AND_GRAPH_DATA.md §3.3).
+func (s *Store) AcknowledgeTraceLink(ctx context.Context, actorID, projectID, linkID uuid.UUID) error {
+	tag, err := s.pool.Exec(ctx,
+		`UPDATE core.trace_links SET is_suspect = false WHERE id = $1 AND project_id = $2 AND is_suspect`,
+		linkID, projectID)
+	if err != nil {
+		return fmt.Errorf("зняття прапорця is_suspect: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		var exists bool
+		if err := s.pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM core.trace_links WHERE id = $1 AND project_id = $2)`,
+			linkID, projectID).Scan(&exists); err != nil {
+			return fmt.Errorf("перевірка існування зв'язку: %w", err)
+		}
+		if !exists {
+			return ErrTraceLinkNotFound
+		}
+		return nil // вже не підозрілий — безпечний no-op
+	}
+	_, err = s.pool.Exec(ctx,
+		`INSERT INTO core.audit_events (actor_user_id, action, scope_type, scope_id, outcome, detail, correlation_id)
+		 VALUES ($1, 'trace.acknowledge', 'project', $2, 'success', $3, $4)`,
+		actorID, projectID, map[string]any{"trace_link_id": linkID.String()}, uuid.New())
+	if err != nil {
+		return fmt.Errorf("запис аудиторської події зняття підозрілості: %w", err)
+	}
+	return nil
+}

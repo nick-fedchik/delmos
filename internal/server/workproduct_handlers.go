@@ -193,6 +193,55 @@ func handleGetWorkProduct(authSvc *auth.Service, projects *project.Store) http.H
 	}
 }
 
+type similarWorkProductView struct {
+	WorkProductID    string  `json:"work_product_id"`
+	Code             string  `json:"code"`
+	Title            string  `json:"title"`
+	Status           string  `json:"status"`
+	CosineSimilarity float64 `json:"cosine_similarity"`
+}
+
+// handleFindSimilarWorkProducts — гібридний семантичний пошук (VEC-02):
+// вектор поточної ревізії артефакту як запит, права доступу застосовуються
+// фільтром project_id на рівні SQL (недоступні документи не потрапляють у
+// видачу). Поки покриває лише вимоги й тест-кейси (embeddableWorkProductTypes).
+func handleFindSimilarWorkProducts(authSvc *auth.Service, projects *project.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		_, projectID, ok := projectScopePermission(w, r, authSvc, "wp.read")
+		if !ok {
+			return
+		}
+
+		workProductID, err := uuid.Parse(r.PathValue("work_product_id"))
+		if err != nil {
+			writeJSONError(w, http.StatusNotFound, "not_found", "work product не знайдено")
+			return
+		}
+
+		detail, err := projects.GetWorkProduct(r.Context(), projectID, workProductID)
+		switch {
+		case errors.Is(err, project.ErrWorkProductNotFound):
+			writeJSONError(w, http.StatusNotFound, "not_found", "work product не знайдено")
+			return
+		case err != nil:
+			writeJSONError(w, http.StatusInternalServerError, "internal_error", "не вдалося прочитати work product")
+			return
+		}
+
+		matches, err := projects.FindSimilarWorkProducts(r.Context(), projectID, workProductID, detail.Latest.ID, 10, 0.82)
+		if err != nil {
+			writeJSONError(w, http.StatusInternalServerError, "internal_error", "не вдалося виконати семантичний пошук")
+			return
+		}
+
+		views := make([]similarWorkProductView, 0, len(matches))
+		for _, match := range matches {
+			views = append(views, similarWorkProductView{WorkProductID: match.WorkProductID.String(), Code: match.Code, Title: match.Title, Status: match.Status, CosineSimilarity: match.CosineSimilarity})
+		}
+		writeJSON(w, http.StatusOK, views)
+	}
+}
+
 func handleReviseWorkProduct(authSvc *auth.Service, projects *project.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		actorID, projectID, ok := projectScopePermission(w, r, authSvc, "wp.edit")

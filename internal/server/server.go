@@ -161,12 +161,18 @@ func newRouter(logger *slog.Logger, deps Deps) http.Handler {
 		requireAuth(requireCSRF(logger, handleReviseSpecification(deps.Auth, deps.Projects))))
 	mux.HandleFunc("POST /api/v1/projects/{project_id}/trace-links",
 		requireAuth(requireCSRF(logger, handleCreateTraceLink(deps.Auth, deps.Projects))))
+	mux.HandleFunc("GET /api/v1/projects/{project_id}/trace-links",
+		requireAuth(handleListTraceLinks(deps.Auth, deps.Projects)))
+	mux.HandleFunc("POST /api/v1/projects/{project_id}/trace-links/{trace_link_id}/acknowledge",
+		requireAuth(requireCSRF(logger, handleAcknowledgeTraceLink(deps.Auth, deps.Projects))))
 	mux.HandleFunc("GET /api/v1/projects/{project_id}/traceability/{source_id}",
 		requireAuth(handleTraverseTraceability(deps.Auth, deps.Projects)))
 	mux.HandleFunc("GET /api/v1/projects/{project_id}/work-products",
 		requireAuth(handleListWorkProducts(deps.Auth, deps.Projects)))
 	mux.HandleFunc("GET /api/v1/projects/{project_id}/work-products/{work_product_id}",
 		requireAuth(handleGetWorkProduct(deps.Auth, deps.Projects)))
+	mux.HandleFunc("GET /api/v1/projects/{project_id}/work-products/{work_product_id}/similar",
+		requireAuth(handleFindSimilarWorkProducts(deps.Auth, deps.Projects)))
 	mux.HandleFunc("POST /api/v1/projects/{project_id}/work-products/{work_product_id}/revisions",
 		requireAuth(requireCSRF(logger, handleReviseWorkProduct(deps.Auth, deps.Projects))))
 	mux.HandleFunc("POST /api/v1/projects/{project_id}/work-products/{work_product_id}/retire",

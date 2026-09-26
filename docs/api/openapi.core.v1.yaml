@@ -425,6 +425,72 @@ paths:
         '404': { $ref: '#/components/responses/Hidden' }
         '409': { $ref: '#/components/responses/Conflict' }
         '422': { $ref: '#/components/responses/Invariant' }
+    get:
+      operationId: listTraceLinks
+      summary: List project traceability links (Change Impact review list, GRP-03)
+      x-required-permission: wp.read
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - name: suspect
+          in: query
+          required: false
+          description: When "true", return only links flagged is_suspect after a source revision.
+          schema: { type: string, enum: ['true', 'false'] }
+      responses:
+        '200':
+          description: Traceability links, newest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/TraceLink' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/Hidden' }
+  /projects/{project_id}/trace-links/{trace_link_id}/acknowledge:
+    post:
+      operationId: acknowledgeTraceLink
+      summary: Clear the is_suspect flag after reviewer confirmation (GRP-03)
+      x-required-permission: trace.create
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - name: trace_link_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: '#/components/parameters/CsrfToken'
+      responses:
+        '204': { description: Suspect flag cleared or already clear (idempotent) }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/Hidden' }
+  /projects/{project_id}/work-products/{work_product_id}/similar:
+    get:
+      operationId: findSimilarWorkProducts
+      summary: Hybrid semantic search for near-duplicate requirements/tests (VEC-01..03)
+      x-required-permission: wp.read
+      description: >-
+        Compares the work product's current revision embedding against other
+        embedded revisions in the same project via pgvector cosine distance.
+        Only vectors of the current embedding model are matched; permission
+        scope is applied as a project_id SQL filter, not post-filtering.
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - name: work_product_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Similar work products ordered by descending cosine similarity
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/SimilarWorkProduct' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/Hidden' }
   /projects/{project_id}/traceability/{source_id}:
     get:
       operationId: traverseTraceability
@@ -654,6 +720,15 @@ components:
         relation_kind: { type: string, enum: [verifies, satisfies, refines, derives_from] }
         is_suspect: { type: boolean }
         is_cycle: { type: boolean }
+    SimilarWorkProduct:
+      type: object
+      required: [work_product_id, code, title, status, cosine_similarity]
+      properties:
+        work_product_id: { type: string, format: uuid }
+        code: { type: string }
+        title: { type: string }
+        status: { type: string }
+        cosine_similarity: { type: number, format: double, minimum: -1, maximum: 1 }
     SpecificationView:
       type: object
       required: [specification_id, work_product, manifest]

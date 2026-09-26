@@ -3,6 +3,19 @@
 Формат ґрунтується на [RELEASE-NOTES-TEMPLATE.md](docs/templates/RELEASE-NOTES-TEMPLATE.md).
 Версії `v0.y.z` не дають гарантій сумісності контрактів (див. [docs/VERSIONING.md §2.1](docs/VERSIONING.md)).
 
+## 1.0.17 — Unreleased
+
+### Додано
+
+- Векторний та графовий шар (Етап 3, ROADMAP.md P3): pgvector, `wp_embeddings`, Change Impact Analysis.
+  - Міграція `0012_wp_embeddings.sql`: таблиця `core.wp_embeddings` (`vector(1536)`) з HNSW-індексом косинусної відстані (`vector_cosine_ops`), прив'язана до точної пари `(work_product_id, revision_id, model_name, model_version)`.
+  - `internal/project/embedding.go`: локальний провайдер ембедінгів (`local-feature-hash`) без зовнішніх мережевих викликів чи API-ключів (feature hashing мішка слів, L2-нормалізація); реальна модель підключається пізніше через той самий `EmbeddingProvider` без зміни схеми (VEC-03).
+  - Вектор рахується синхронно в тій самій транзакції, що й ревізія (`wp.create`/`wp.revise`), лише для `requirement` і `test_spec` — тимчасове відхилення від SWR-36.2 (асинхронно через outbox) до появи черги подій/автоматизації (Етап 4).
+  - `GET /api/v1/projects/{project_id}/work-products/{work_product_id}/similar`: гібридний семантичний пошук з фільтрами проєкту і моделі в одному SQL-запиті (VEC-01..03).
+  - Каскадне поширення прапорця `is_suspect` (Change Impact Analysis, GRP-03): нова ревізія артефакту позначає підозрілими всі прямі й опосередковані ребра графа trace_links рекурсивним SQL в тій самій транзакції.
+  - `GET /api/v1/projects/{project_id}/trace-links` (аудиторський список перегляду з `?suspect=true`) та `POST .../trace-links/{id}/acknowledge` (явна дія рецензента для зняття `is_suspect`).
+  - `TestTraverseTraceabilityDetectsCycle` (GRP-01/02), `TestReviseWorkProductPropagatesSuspectFlag` (GRP-03), `TestFindSimilarWorkProductsHybridSearch` (VEC-01/02), `TestFindSimilarWorkProductsIgnoresOtherModelVectors` (VEC-03).
+
 ## 1.0.16 — Unreleased
 
 ### Виправлено
