@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 
 	"delmos/internal/auth"
+	"delmos/internal/automation"
 	"delmos/internal/project"
 )
 
@@ -262,6 +263,7 @@ func handleReviseWorkProduct(authSvc *auth.Service, projects *project.Store) htt
 		}
 
 		revision, err := projects.ReviseWorkProduct(r.Context(), actorID, projectID, workProductID, req.ExpectedRowVersion, req.Body, req.Metadata)
+		var violation *automation.RuleViolationError
 		switch {
 		case errors.Is(err, project.ErrWorkProductNotFound):
 			writeJSONError(w, http.StatusNotFound, "not_found", "work product не знайдено")
@@ -271,6 +273,9 @@ func handleReviseWorkProduct(authSvc *auth.Service, projects *project.Store) htt
 			return
 		case errors.Is(err, project.ErrVersionConflict):
 			writeJSONError(w, http.StatusConflict, "version_conflict", err.Error())
+			return
+		case errors.As(err, &violation):
+			writeJSONError(w, http.StatusUnprocessableEntity, "rule_rejected", err.Error())
 			return
 		case err != nil:
 			writeJSONError(w, http.StatusInternalServerError, "internal_error", "не вдалося створити ревізію")
@@ -306,12 +311,19 @@ func handleRetireWorkProduct(authSvc *auth.Service, projects *project.Store) htt
 		}
 
 		err = projects.RetireWorkProduct(r.Context(), actorID, projectID, workProductID, req.ExpectedRowVersion)
+		var violation *automation.RuleViolationError
 		switch {
 		case errors.Is(err, project.ErrWorkProductNotFound):
 			writeJSONError(w, http.StatusNotFound, "not_found", "work product не знайдено")
 			return
 		case errors.Is(err, project.ErrVersionConflict):
 			writeJSONError(w, http.StatusConflict, "version_conflict", err.Error())
+			return
+		case errors.Is(err, project.ErrProjectPlanReserved):
+			writeJSONError(w, http.StatusUnprocessableEntity, "project_plan_reserved", err.Error())
+			return
+		case errors.As(err, &violation):
+			writeJSONError(w, http.StatusUnprocessableEntity, "rule_rejected", err.Error())
 			return
 		case err != nil:
 			writeJSONError(w, http.StatusInternalServerError, "internal_error", "не вдалося вивести work product з експлуатації")

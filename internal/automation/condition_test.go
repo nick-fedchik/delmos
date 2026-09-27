@@ -63,3 +63,10 @@ func TestEvaluateUnknownPredicateIsError(t *testing.T) {
 		t.Fatal("очікувалася помилка для незареєстрованого предиката")
 	}
 }
+
+func TestSchemaValidationCannotPassWithoutValidator(t *testing.T) {
+	ok, err := automation.Evaluate(automation.EvalContext{}, automation.ConditionNode{PredicateKey: "schema_valid"})
+	if err == nil || ok {
+		t.Fatalf("поки валідатор не реалізовано, schema_valid має блокувати mandatory rule: ok=%v err=%v", ok, err)
+	}
+}

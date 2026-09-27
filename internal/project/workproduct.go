@@ -210,37 +210,59 @@ func (s *Store) ReviseWorkProduct(ctx context.Context, actorID, projectID, workP
 // RetireWorkProduct переводить чернетку в obsolete (wp.retire, WORK_PRODUCTS.md §4:
 // Draft -> Obsolete). Уже виведений з експлуатації WP — безпечний no-op, не помилка.
 func (s *Store) RetireWorkProduct(ctx context.Context, actorID, projectID, workProductID uuid.UUID, expectedRowVersion int64) error {
-	tag, err := s.pool.Exec(ctx,
-		`UPDATE core.work_products SET status = 'obsolete', row_version = row_version + 1
-		 WHERE id = $1 AND project_id = $2 AND row_version = $3 AND status != 'obsolete'`,
-		workProductID, projectID, expectedRowVersion)
+	tx, err := s.pool.Begin(ctx)
 	if err != nil {
-		return fmt.Errorf("виведення work product з експлуатації: %w", err)
+		return fmt.Errorf("початок транзакції виведення work product: %w", err)
 	}
-	if tag.RowsAffected() == 0 {
-		var currentVersion int64
-		var status string
-		checkErr := s.pool.QueryRow(ctx,
-			`SELECT row_version, status FROM core.work_products WHERE id = $1 AND project_id = $2`,
-			workProductID, projectID).Scan(&currentVersion, &status)
-		if errors.Is(checkErr, pgx.ErrNoRows) {
-			return ErrWorkProductNotFound
-		}
-		if checkErr != nil {
-			return fmt.Errorf("перевірка стану work product: %w", checkErr)
-		}
-		if status == "obsolete" {
-			return nil // вже виведено з експлуатації — безпечний no-op
-		}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	var status string
+	var wpType string
+	var rowVersion int64
+	err = tx.QueryRow(ctx,
+		`SELECT status, type, row_version FROM core.work_products WHERE id = $1 AND project_id = $2 FOR UPDATE`,
+		workProductID, projectID).Scan(&status, &wpType, &rowVersion)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrWorkProductNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("читання work product для виведення: %w", err)
+	}
+	if wpType == planType {
+		return ErrProjectPlanReserved
+	}
+	if status == "obsolete" {
+		return nil
+	}
+	if rowVersion != expectedRowVersion {
 		return ErrVersionConflict
 	}
 
 	correlationID := uuid.New()
-	if err := s.recordProjectAudit(ctx, actorID, projectID, "wp.retire", correlationID,
+	if err := automation.EnforceRules(ctx, tx, "trigger.core.before_wp_transition",
+		automation.EvalContext{Fields: map[string]any{"status": status, "action": "retire", "target_status": "obsolete"}},
+		actorID, projectID, correlationID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx,
+		`UPDATE core.work_products SET status = 'obsolete', row_version = row_version + 1 WHERE id = $1`,
+		workProductID); err != nil {
+		return fmt.Errorf("виведення work product з експлуатації: %w", err)
+	}
+	if err := supersedeOpenReviewRequest(ctx, tx, workProductID); err != nil {
+		return err
+	}
+	if err := s.recordProjectAuditTx(ctx, tx, actorID, projectID, "wp.retire",
 		map[string]any{"work_product_id": workProductID.String()}); err != nil {
 		return err
 	}
-
+	if err := automation.EmitEvent(ctx, tx, "wp.retired", &projectID, &actorID, correlationID,
+		map[string]any{"work_product_id": workProductID.String()}); err != nil {
+		return err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("фіксація виведення work product: %w", err)
+	}
 	return nil
 }
 

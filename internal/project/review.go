@@ -87,6 +87,14 @@ func (s *Store) SubmitWorkProduct(ctx context.Context, actorID, projectID, workP
 			return ReviewRequest{}, fmt.Errorf("%w: %s", ErrAssigneeIsAuthor, a.Role)
 		}
 	}
+	correlationID := uuid.New()
+	if err := automation.EnforceRules(ctx, tx, "trigger.core.before_wp_transition",
+		automation.EvalContext{Fields: map[string]any{
+			"status": status, "action": "submit", "target_status": "in_review",
+			"work_product_id": workProductID.String(), "revision_id": revisionID.String(),
+		}}, actorID, projectID, correlationID); err != nil {
+		return ReviewRequest{}, err
+	}
 
 	var request ReviewRequest
 	err = tx.QueryRow(ctx,
@@ -118,7 +126,6 @@ func (s *Store) SubmitWorkProduct(ctx context.Context, actorID, projectID, workP
 		return ReviewRequest{}, fmt.Errorf("перехід артефакту в in_review: %w", err)
 	}
 
-	correlationID := uuid.New()
 	if _, err := tx.Exec(ctx,
 		`INSERT INTO core.audit_events (actor_user_id, action, scope_type, scope_id, outcome, detail, correlation_id)
 		 VALUES ($1, 'wp.submit', 'project', $2, 'success', $3, $4)`,

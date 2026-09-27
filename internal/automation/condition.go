@@ -32,9 +32,9 @@ var predicates = map[string]PredicateFunc{
 	"field_equals":    predicateFieldEquals,
 	"field_not_empty": predicateFieldNotEmpty,
 	"permission":      predicatePermission,
-	// schema_valid — заглушка до появи валідатора JSON Schema Draft 2020-12
-	// (Етап 2, ще не реалізований окремо від композитних специфікацій).
-	"schema_valid": func(EvalContext, map[string]any) (bool, error) { return true, nil },
+	"schema_valid": func(EvalContext, map[string]any) (bool, error) {
+		return false, fmt.Errorf("schema_valid: валідатор схеми для правил не реалізовано")
+	},
 }
 
 func predicateFieldEquals(ctx EvalContext, params map[string]any) (bool, error) {

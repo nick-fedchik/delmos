@@ -38,9 +38,10 @@ func PhaseGateFacts(ctx context.Context, tx pgx.Tx, projectID uuid.UUID, phaseKe
 	facts := map[string]any{FieldPhaseKey: phaseKey, FieldEconomicsApplicable: false}
 
 	var baselineID uuid.UUID
+	var currency string
 	err := tx.QueryRow(ctx,
-		`SELECT id FROM core.cost_baselines
-		 WHERE project_id = $1 AND status = 'approved'`, projectID).Scan(&baselineID)
+		`SELECT id, currency FROM core.cost_baselines
+		 WHERE project_id = $1 AND status = 'approved'`, projectID).Scan(&baselineID, &currency)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return facts, nil
 	}
@@ -48,6 +49,9 @@ func PhaseGateFacts(ctx context.Context, tx pgx.Tx, projectID uuid.UUID, phaseKe
 		return nil, fmt.Errorf("читання затвердженого кошторису: %w", err)
 	}
 	facts[FieldEconomicsApplicable] = true
+	if err := validateCostInputs(ctx, tx, projectID, currency, asOf); err != nil {
+		return nil, err
+	}
 
 	var actualCost, fundingLimit, earnedValue string
 	err = tx.QueryRow(ctx,

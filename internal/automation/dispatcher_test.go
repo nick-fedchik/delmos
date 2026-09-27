@@ -144,6 +144,10 @@ func TestDeadLetterAfterMaxAttempts(t *testing.T) {
 		return context.DeadlineExceeded
 	})
 	engine.RegisterHandler("trigger.core.after_revision_committed", failing)
+	if _, err := pool.Exec(ctx, `UPDATE core.trigger_subscriptions SET active = false
+		WHERE event_key = 'wp.revision_committed' AND trigger_key <> 'trigger.core.after_revision_committed'`); err != nil {
+		t.Fatalf("ізоляція перевірюваної доставки: %v", err)
+	}
 
 	tx, err := pool.Begin(ctx)
 	if err != nil {

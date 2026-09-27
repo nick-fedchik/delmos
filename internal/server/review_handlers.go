@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 
 	"delmos/internal/auth"
+	"delmos/internal/automation"
 	"delmos/internal/project"
 )
 
@@ -51,6 +52,7 @@ func handleSubmitWorkProduct(authSvc *auth.Service, projects *project.Store) htt
 		}
 
 		request, err := projects.SubmitWorkProduct(r.Context(), actor, projectID, workProductID, assignments)
+		var violation *automation.RuleViolationError
 		switch {
 		case err == nil:
 			writeJSON(w, http.StatusCreated, request)
@@ -64,6 +66,8 @@ func handleSubmitWorkProduct(authSvc *auth.Service, projects *project.Store) htt
 			writeJSONError(w, http.StatusUnprocessableEntity, "no_revision", "артефакт не має жодної ревізії")
 		case errors.Is(err, project.ErrAssigneeIsAuthor):
 			writeJSONError(w, http.StatusUnprocessableEntity, "assignee_is_author", err.Error())
+		case errors.As(err, &violation):
+			writeJSONError(w, http.StatusUnprocessableEntity, "rule_rejected", err.Error())
 		default:
 			writeJSONError(w, http.StatusInternalServerError, "internal_error", "не вдалося подати артефакт на рецензію")
 		}
@@ -100,6 +104,7 @@ func handleReviewDecision(authSvc *auth.Service, projects *project.Store, kind, 
 
 		decision, err := projects.RecordDecision(r.Context(), actor, projectID, workProductID,
 			kind, req.Reason, req.OperationKey)
+		var violation *automation.RuleViolationError
 		switch {
 		case err == nil:
 			writeJSON(w, http.StatusCreated, decision)
@@ -119,6 +124,8 @@ func handleReviewDecision(authSvc *auth.Service, projects *project.Store, kind, 
 			writeJSONError(w, http.StatusUnprocessableEntity, "no_positive_review", err.Error())
 		case errors.Is(err, project.ErrReasonRequired):
 			writeJSONError(w, http.StatusUnprocessableEntity, "reason_required", err.Error())
+		case errors.As(err, &violation):
+			writeJSONError(w, http.StatusUnprocessableEntity, "rule_rejected", err.Error())
 		default:
 			writeJSONError(w, http.StatusInternalServerError, "internal_error", "не вдалося зафіксувати рішення")
 		}

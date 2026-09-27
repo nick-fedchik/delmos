@@ -230,6 +230,21 @@ func TestPhaseClosesWithoutApprovedBaseline(t *testing.T) {
 	}
 }
 
+func TestPhaseCannotCloseWithPendingMilestone(t *testing.T) {
+	f := newPhaseFixture(t)
+	f.activate(t)
+	_, err := f.pool.Exec(context.Background(), `INSERT INTO core.project_milestones
+		(project_id, milestone_key, phase_key, name, status, config_generation)
+		VALUES ($1, 'GATE-1', $2, 'Exit review', 'pending', 1)`, f.projectID, gatePhase)
+	if err != nil {
+		t.Fatalf("створення віхи: %v", err)
+	}
+	_, err = f.projects.TransitionPhase(context.Background(), f.actor, f.projectID, gatePhase, "completed", gateAsOf)
+	if !errors.Is(err, project.ErrPhaseGateRejected) || f.status(t) != "active" {
+		t.Fatalf("фаза з pending-віхою має лишатися active: %v", err)
+	}
+}
+
 // SWR-22.3: під економічним контролем шлюз не відкривається, доки метрики не
 // пораховано. Витрати тут у межах ліміту — отже блокує саме брак вимірювань,
 // а не перевищення бюджету.

@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"delmos/internal/automation"
 	"delmos/internal/project"
 )
 
@@ -80,6 +81,41 @@ func TestReviewThenApprovalApprovesWorkProduct(t *testing.T) {
 	}
 	if got := f.requestStatus(t, req.ID); got != "approved" {
 		t.Errorf("статус запиту = %q, очікувано approved", got)
+	}
+}
+
+func TestApprovalHonorsBeforeWPTransitionRule(t *testing.T) {
+	f := newSubmitFixture(t)
+	req := f.submitted(t)
+	if _, err := f.decide(t, f.reviewer, project.DecisionReview, "", ""); err != nil {
+		t.Fatal(err)
+	}
+	_, err := f.pool.Exec(context.Background(), `INSERT INTO core.rule_definitions
+		(rule_key, trigger_key, enforcement_level, when_condition, assert_condition)
+		VALUES ('rule.test.no_approval', 'trigger.core.before_wp_transition', 'MANDATORY_VETO',
+		'{"predicate_key":"field_equals","params":{"field":"target_status","value":"approved"}}',
+		'{"predicate_key":"always_false"}')`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = f.decide(t, f.approver2, project.DecisionApproval, "", "")
+	var violation *automation.RuleViolationError
+	if !errors.As(err, &violation) || violation.RuleKey != "rule.test.no_approval" {
+		t.Fatalf("очікувано вето погодження, отримано %v", err)
+	}
+	if status := f.wpStatus(t, f.workProductID); status != "in_review" {
+		t.Fatalf("після вето WP має лишитись in_review, отримано %s", status)
+	}
+	if status := f.requestStatus(t, req.ID); status != "open" {
+		t.Fatalf("після вето запит має лишитись open, отримано %s", status)
+	}
+	var approvals int
+	if err := f.pool.QueryRow(context.Background(),
+		`SELECT count(*) FROM core.review_decisions WHERE review_request_id = $1 AND decision_kind = 'approval'`, req.ID).Scan(&approvals); err != nil {
+		t.Fatal(err)
+	}
+	if approvals != 0 {
+		t.Fatalf("після вето не повинно бути рішення погоджувача: %d", approvals)
 	}
 }
 

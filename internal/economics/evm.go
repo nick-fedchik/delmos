@@ -20,6 +20,7 @@ import (
 var (
 	ErrNoApprovedBaseline = errors.New("для проєкту немає затвердженого базового кошторису")
 	ErrPhaseNotFound      = errors.New("фазу не знайдено в проєкті")
+	ErrIncompleteCostData = errors.New("неможливо достовірно обчислити фактичні витрати")
 )
 
 type Store struct {
@@ -108,9 +109,22 @@ actual_cost AS (
 //   - EV: правило 0/100 за результатами фази — результат зараховується лише
 //     після переходу в approved, часткової готовності не буває.
 func (s *Store) ComputeEarnedValue(ctx context.Context, projectID uuid.UUID, asOf time.Time) (EarnedValueSnapshot, error) {
+	return s.computeEarnedValue(ctx, s.pool, projectID, asOf)
+}
+
+type evmQuerier interface {
+	costInputQuerier
+	Query(context.Context, string, ...any) (pgx.Rows, error)
+}
+
+func (s *Store) ComputeEarnedValueTx(ctx context.Context, tx pgx.Tx, projectID uuid.UUID, asOf time.Time) (EarnedValueSnapshot, error) {
+	return s.computeEarnedValue(ctx, tx, projectID, asOf)
+}
+
+func (s *Store) computeEarnedValue(ctx context.Context, db evmQuerier, projectID uuid.UUID, asOf time.Time) (EarnedValueSnapshot, error) {
 	snapshot := EarnedValueSnapshot{ProjectID: projectID, AsOf: asOf}
 
-	err := s.pool.QueryRow(ctx,
+	err := db.QueryRow(ctx,
 		`SELECT id, version, currency FROM core.cost_baselines
 		 WHERE project_id = $1 AND status = 'approved'`, projectID).
 		Scan(&snapshot.BaselineID, &snapshot.BaseVersion, &snapshot.Currency)
@@ -119,6 +133,9 @@ func (s *Store) ComputeEarnedValue(ctx context.Context, projectID uuid.UUID, asO
 	}
 	if err != nil {
 		return EarnedValueSnapshot{}, fmt.Errorf("читання затвердженого кошторису: %w", err)
+	}
+	if err := validateCostInputs(ctx, db, projectID, snapshot.Currency, asOf); err != nil {
+		return EarnedValueSnapshot{}, err
 	}
 
 	query := `
@@ -167,7 +184,7 @@ LEFT JOIN phase_progress pp ON pp.phase_key = ph.phase_key
 WHERE ph.project_id = $1
 ORDER BY ph.planned_start NULLS LAST, ph.phase_key`
 
-	rows, err := s.pool.Query(ctx, query, projectID, asOf, snapshot.BaselineID)
+	rows, err := db.Query(ctx, query, projectID, asOf, snapshot.BaselineID)
 	if err != nil {
 		return EarnedValueSnapshot{}, fmt.Errorf("розрахунок здобутої цінності: %w", err)
 	}
@@ -185,20 +202,61 @@ ORDER BY ph.planned_start NULLS LAST, ph.phase_key`
 		return EarnedValueSnapshot{}, fmt.Errorf("обхід показників фаз: %w", err)
 	}
 
-	if err := s.aggregate(ctx, &snapshot); err != nil {
+	if err := s.aggregate(ctx, db, &snapshot); err != nil {
 		return EarnedValueSnapshot{}, err
 	}
 	return snapshot, nil
 }
 
+type costInputQuerier interface {
+	QueryRow(context.Context, string, ...any) pgx.Row
+}
+
+func validateCostInputs(ctx context.Context, db costInputQuerier, projectID uuid.UUID, currency string, asOf time.Time) error {
+	var missingRates, mismatchedRates, mismatchedExpenses int
+	err := db.QueryRow(ctx, `
+		SELECT
+			(SELECT count(*) FROM core.work_records wr
+			 LEFT JOIN LATERAL (
+				SELECT lr.hourly_rate, lr.currency FROM core.labor_rates lr
+				WHERE lr.role_key = wr.role_key
+				  AND (lr.project_id = wr.project_id OR lr.project_id IS NULL)
+				  AND lr.valid_from <= wr.work_date
+				  AND (lr.valid_to IS NULL OR lr.valid_to > wr.work_date)
+				ORDER BY lr.project_id NULLS LAST LIMIT 1
+			 ) rate ON true
+			 WHERE wr.project_id = $1 AND wr.work_date <= $2 AND rate.hourly_rate IS NULL),
+			(SELECT count(*) FROM core.work_records wr
+			 JOIN LATERAL (
+				SELECT lr.currency FROM core.labor_rates lr
+				WHERE lr.role_key = wr.role_key
+				  AND (lr.project_id = wr.project_id OR lr.project_id IS NULL)
+				  AND lr.valid_from <= wr.work_date
+				  AND (lr.valid_to IS NULL OR lr.valid_to > wr.work_date)
+				ORDER BY lr.project_id NULLS LAST LIMIT 1
+			 ) rate ON true
+			 WHERE wr.project_id = $1 AND wr.work_date <= $2 AND rate.currency <> $3),
+			(SELECT count(*) FROM core.expense_records er
+			 WHERE er.project_id = $1 AND er.expense_date <= $2 AND er.currency <> $3)`,
+		projectID, asOf, currency).Scan(&missingRates, &mismatchedRates, &mismatchedExpenses)
+	if err != nil {
+		return fmt.Errorf("перевірка вхідних даних витрат: %w", err)
+	}
+	if missingRates > 0 || mismatchedRates > 0 || mismatchedExpenses > 0 {
+		return fmt.Errorf("%w: відсутніх ставок %d, ставок в іншій валюті %d, витрат в іншій валюті %d",
+			ErrIncompleteCostData, missingRates, mismatchedRates, mismatchedExpenses)
+	}
+	return nil
+}
+
 // aggregate підсумовує показники проєкту та похідні індекси засобами NUMERIC.
-func (s *Store) aggregate(ctx context.Context, snapshot *EarnedValueSnapshot) error {
+func (s *Store) aggregate(ctx context.Context, db evmQuerier, snapshot *EarnedValueSnapshot) error {
 	var pv, ac, ev, bac, cv, sv string
 	var cpi, spi, eac *string
 
 	// Підсумки беруться з уже порахованих фазових значень, щоб проєктні та
 	// фазові показники не розходилися через різні шляхи обчислення.
-	err := s.pool.QueryRow(ctx,
+	err := db.QueryRow(ctx,
 		`WITH phase AS (
 		    SELECT unnest($1::numeric[]) AS pv,
 		           unnest($2::numeric[]) AS ac,
@@ -240,7 +298,7 @@ func (s *Store) aggregate(ctx context.Context, snapshot *EarnedValueSnapshot) er
 	snapshot.EstimateAtCompletion = eac
 
 	for i := range snapshot.Phases {
-		over, err := s.exceedsLimit(ctx, snapshot.Phases[i].ActualCost, snapshot.Phases[i].FundingLimit)
+		over, err := s.exceedsLimit(ctx, db, snapshot.Phases[i].ActualCost, snapshot.Phases[i].FundingLimit)
 		if err != nil {
 			return err
 		}
@@ -251,9 +309,9 @@ func (s *Store) aggregate(ctx context.Context, snapshot *EarnedValueSnapshot) er
 
 // exceedsLimit порівнює суми в NUMERIC: переведення у float для порівняння
 // грошей дало б хибний результат на межі (наприклад 0.1+0.2 > 0.3).
-func (s *Store) exceedsLimit(ctx context.Context, actual, limit string) (bool, error) {
+func (s *Store) exceedsLimit(ctx context.Context, db evmQuerier, actual, limit string) (bool, error) {
 	var over bool
-	if err := s.pool.QueryRow(ctx,
+	if err := db.QueryRow(ctx,
 		`SELECT $1::numeric > $2::numeric AND $2::numeric > 0`, actual, limit).Scan(&over); err != nil {
 		return false, fmt.Errorf("порівняння з лімітом фінансування: %w", err)
 	}

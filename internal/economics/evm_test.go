@@ -174,6 +174,40 @@ func TestActualCostUsesRateValidOnWorkDate(t *testing.T) {
 	}
 }
 
+func TestActualCostRejectsWorkWithoutRate(t *testing.T) {
+	f := newFixture(t)
+	f.approvedBaseline(t)
+	mustLog(t, f, date(2026, 1, 5), "8.00")
+
+	_, err := f.store.ComputeEarnedValue(context.Background(), f.project, controlDate)
+	if !errors.Is(err, ErrIncompleteCostData) {
+		t.Fatalf("робота без ставки має блокувати розрахунок AC: %v", err)
+	}
+}
+
+func TestActualCostRejectsRateInOtherCurrency(t *testing.T) {
+	f := newFixture(t)
+	f.approvedBaseline(t)
+	if _, err := f.store.SetLaborRate(context.Background(), &f.project, "engineer", "100.00", "USD", phaseStart, nil); err != nil {
+		t.Fatalf("ставка: %v", err)
+	}
+	mustLog(t, f, date(2026, 1, 5), "8.00")
+	if _, err := f.store.ComputeEarnedValue(context.Background(), f.project, controlDate); !errors.Is(err, ErrIncompleteCostData) {
+		t.Fatalf("валюта ставки не збігається з кошторисом: %v", err)
+	}
+}
+
+func TestActualCostRejectsExpenseRecordedBeforeBaselineInOtherCurrency(t *testing.T) {
+	f := newFixture(t)
+	if _, err := f.store.RecordExpense(context.Background(), f.project, f.author, "design", "hardware_prototypes", "capex", "100.00", "USD", "INV-1", date(2026, 1, 5)); err != nil {
+		t.Fatalf("витрата до кошторису: %v", err)
+	}
+	f.approvedBaseline(t)
+	if _, err := f.store.ComputeEarnedValue(context.Background(), f.project, controlDate); !errors.Is(err, ErrIncompleteCostData) {
+		t.Fatalf("старі витрати в іншій валюті мають блокувати AC: %v", err)
+	}
+}
+
 // Зміна ставки заднім числом не повинна переписувати вже пораховану історію.
 func TestRateVersionsMayNotOverlap(t *testing.T) {
 	f := newFixture(t)
@@ -268,6 +302,56 @@ func TestExpenseRejectedForClosedPhase(t *testing.T) {
 		"hardware_prototypes", "capex", "500.00", "EUR", "INV-9", date(2026, 1, 5))
 	if !errors.Is(err, ErrPhaseNotOpen) {
 		t.Fatalf("очікувано ErrPhaseNotOpen, отримано %v", err)
+	}
+}
+
+func TestPhaseCompletionSerializesEconomicWrites(t *testing.T) {
+	for _, scenario := range []struct {
+		name  string
+		write func(context.Context, *fixture) error
+	}{
+		{"work", func(ctx context.Context, f *fixture) error {
+			_, err := f.store.LogWorkRecord(ctx, WorkRecord{
+				ProjectID: f.project, UserID: f.author, PhaseKey: "design", RoleKey: "engineer",
+				WorkDate: date(2026, 1, 5), DurationHours: "8.00", WorkCategory: "design",
+			})
+			return err
+		}},
+		{"expense", func(ctx context.Context, f *fixture) error {
+			_, err := f.store.RecordExpense(ctx, f.project, f.author, "design",
+				"hardware_prototypes", "capex", "100.00", "EUR", "INV-LOCK", date(2026, 1, 5))
+			return err
+		}},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			f := newFixture(t)
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			tx, err := f.pool.Begin(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = tx.Rollback(ctx) }()
+			if _, err := tx.Exec(ctx, `UPDATE core.project_phases SET status = 'completed'
+				WHERE project_id = $1 AND phase_key = 'design'`, f.project); err != nil {
+				t.Fatal(err)
+			}
+			started := make(chan struct{})
+			done := make(chan error, 1)
+			go func() { close(started); done <- scenario.write(ctx, f) }()
+			<-started
+			select {
+			case err := <-done:
+				t.Fatalf("запис пройшов повз незакомічене завершення: %v", err)
+			case <-time.After(50 * time.Millisecond):
+			}
+			if err := tx.Commit(ctx); err != nil {
+				t.Fatal(err)
+			}
+			if err := <-done; !errors.Is(err, ErrPhaseNotOpen) {
+				t.Fatalf("після завершення фази очікувано ErrPhaseNotOpen: %v", err)
+			}
+		})
 	}
 }
 

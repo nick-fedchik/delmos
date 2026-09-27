@@ -70,6 +70,32 @@ func (s *Store) TransitionPhase(ctx context.Context, actorID, projectID uuid.UUI
 	if !phaseTransitionAllowed(currentStatus, targetStatus) {
 		return PhaseTransitionResult{}, fmt.Errorf("%w: %s -> %s", ErrPhaseTransitionInvalid, currentStatus, targetStatus)
 	}
+	if targetStatus == "completed" {
+		var pending int
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM core.project_milestones ms
+			LEFT JOIN core.project_plan_bindings b ON b.project_id = ms.project_id
+			LEFT JOIN LATERAL (SELECT id, outcome, plan_revision_id, config_generation
+				FROM core.gate_decisions WHERE milestone_id = ms.id
+				AND config_generation = ms.config_generation
+				ORDER BY decided_at DESC, id DESC LIMIT 1) gd ON true
+			WHERE ms.project_id = $1 AND ms.phase_key = $2
+			  AND (ms.status <> 'passed' OR gd.id IS NULL OR gd.outcome <> 'passed'
+			    OR b.effective_plan_revision_id IS DISTINCT FROM gd.plan_revision_id
+			    OR b.config_generation IS DISTINCT FROM gd.config_generation
+			    OR (SELECT count(*) FROM core.gate_decision_evidence e WHERE e.gate_decision_id = gd.id)
+			       <> cardinality(ms.deliverable_keys)
+			    OR EXISTS (SELECT 1 FROM core.gate_decision_evidence e
+			      JOIN core.work_products wp ON wp.id = e.work_product_id
+			      WHERE e.gate_decision_id = gd.id AND
+			        (wp.status <> 'approved' OR e.revision_id IS DISTINCT FROM
+			          (SELECT r.id FROM core.work_product_revisions r WHERE r.work_product_id = wp.id
+			           ORDER BY r.revision_number DESC LIMIT 1))))`, projectID, phaseKey).Scan(&pending); err != nil {
+			return PhaseTransitionResult{}, fmt.Errorf("перевірка віх фази: %w", err)
+		}
+		if pending > 0 {
+			return PhaseTransitionResult{}, fmt.Errorf("%w: %d віх фази не прийнято", ErrPhaseGateRejected, pending)
+		}
+	}
 
 	// CORE-CONTRACT-002 §4.1: фаза не відкривається, доки всі її залежності не
 	// завершені. Перевіряється в тій самій транзакції під блокуванням
@@ -87,6 +113,9 @@ func (s *Store) TransitionPhase(ctx context.Context, actorID, projectID uuid.UUI
 
 	facts, err := economics.PhaseGateFacts(ctx, tx, projectID, phaseKey, asOf)
 	if err != nil {
+		if errors.Is(err, economics.ErrIncompleteCostData) {
+			return PhaseTransitionResult{}, fmt.Errorf("%w: %w", ErrPhaseGateRejected, err)
+		}
 		return PhaseTransitionResult{}, err
 	}
 	facts[economics.FieldTargetStatus] = targetStatus

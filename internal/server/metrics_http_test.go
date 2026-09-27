@@ -154,6 +154,11 @@ func TestMetricObservationsProducedAndServedOverHTTP(t *testing.T) {
 	if ac.PhaseKey != "design" {
 		t.Errorf("AC віднесено до фази %q, очікувано design", ac.PhaseKey)
 	}
+	if ac.BaselineID == nil || ac.BaselineID.String() != baselineBody.ID ||
+		ac.BaselineVersion == nil || *ac.BaselineVersion != 1 ||
+		ac.ConfigGeneration == nil || ac.SourceVersion == 0 {
+		t.Fatalf("вимірювання не має версійованого походження: %+v", ac)
+	}
 
 	// Жодного результату не затверджено, тож здобута цінність нульова.
 	// CPI при цьому дорівнює саме нулю — це справжнє вимірювання («витрачено
@@ -178,5 +183,44 @@ func TestMetricObservationsProducedAndServedOverHTTP(t *testing.T) {
 	}
 	if spi.Quality != metrics.QualityValid {
 		t.Errorf("якість SPI = %q, очікувано valid", spi.Quality)
+	}
+	more := doJSON(t, handler, http.MethodPost, base+"/expenses", map[string]string{
+		"phase_key": "design", "cost_category": "hardware_prototypes", "expense_type": "capex",
+		"amount": "100.00", "currency": "EUR", "expense_date": "2026-01-11",
+	}, cookie, csrf)
+	if more.Code != http.StatusCreated {
+		t.Fatalf("додаткова витрата: %d %s", more.Code, more.Body.String())
+	}
+	stale := doJSON(t, handler, http.MethodGet,
+		"/api/v1/projects/"+projectID+"/metrics/observations", nil, cookie, csrf)
+	if stale.Code != http.StatusOK {
+		t.Fatalf("читання stale: %d %s", stale.Code, stale.Body.String())
+	}
+	if err := json.Unmarshal(stale.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	for _, obs := range body.Observations {
+		if obs.MetricKey == "economics.ac" && obs.Quality != metrics.QualityStale {
+			t.Fatalf("після нової витрати AC до обробки події має бути stale: %+v", obs)
+		}
+	}
+	blocked := doJSON(t, handler, http.MethodPost,
+		"/api/v1/projects/"+projectID+"/phases/design/transition",
+		map[string]string{"target_status": "completed"}, cookie, csrf)
+	if blocked.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("шлюз до перерахунку має бути закритий: %d %s", blocked.Code, blocked.Body.String())
+	}
+	drainAutomation(t, pool)
+	refreshed := doJSON(t, handler, http.MethodGet,
+		"/api/v1/projects/"+projectID+"/metrics/observations", nil, cookie, csrf)
+	if err := json.Unmarshal(refreshed.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	for _, obs := range body.Observations {
+		if obs.MetricKey == "economics.ac" {
+			if obs.Quality != metrics.QualityValid || obs.Value == nil || *obs.Value != "4100.000000" {
+				t.Fatalf("після перерахунку AC має бути valid і 4100: %+v", obs)
+			}
+		}
 	}
 }

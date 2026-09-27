@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"delmos/internal/automation"
 	"delmos/internal/project"
 )
 
@@ -115,6 +116,35 @@ func TestSubmitMovesWorkProductToInReview(t *testing.T) {
 	}
 }
 
+func TestSubmitHonorsBeforeWPTransitionRule(t *testing.T) {
+	f := newSubmitFixture(t)
+	ctx := context.Background()
+	_, err := f.pool.Exec(ctx, `INSERT INTO core.rule_definitions
+		(rule_key, trigger_key, enforcement_level, when_condition, assert_condition)
+		VALUES ('rule.test.no_submit', 'trigger.core.before_wp_transition', 'MANDATORY_VETO',
+		'{"predicate_key":"field_equals","params":{"field":"target_status","value":"in_review"}}',
+		'{"predicate_key":"always_false"}')`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = f.projects.SubmitWorkProduct(ctx, f.actor, f.projectID, f.workProductID, f.defaultAssignments())
+	var violation *automation.RuleViolationError
+	if !errors.As(err, &violation) || violation.RuleKey != "rule.test.no_submit" {
+		t.Fatalf("очікувано вето подання, отримано %v", err)
+	}
+	if status := f.wpStatus(t, f.workProductID); status != "draft" {
+		t.Fatalf("після вето WP має бути draft, отримано %s", status)
+	}
+	var requests int
+	if err := f.pool.QueryRow(ctx,
+		`SELECT count(*) FROM core.review_requests WHERE work_product_id = $1`, f.workProductID).Scan(&requests); err != nil {
+		t.Fatal(err)
+	}
+	if requests != 0 {
+		t.Fatalf("подання не мало створити review request: %d", requests)
+	}
+}
+
 // Автор ревізії не може бути рецензентом чи погоджувачем — це ядро SoD
 // (ADR-009 §2). Перевірка має спрацьовувати вже на подінні, а не на рішенні.
 func TestSubmitRejectsAuthorAsAssignee(t *testing.T) {
@@ -201,6 +231,23 @@ func TestNewRevisionSupersedesOpenReviewRequest(t *testing.T) {
 
 	if got := f.requestStatus(t, req.ID); got != "superseded" {
 		t.Errorf("статус запиту = %q, очікувано superseded після нової ревізії", got)
+	}
+}
+
+func TestRetiringWorkProductSupersedesOpenReviewRequest(t *testing.T) {
+	f := newSubmitFixture(t)
+	ctx := context.Background()
+	req := f.submitted(t)
+	var rowVersion int64
+	if err := f.pool.QueryRow(ctx,
+		`SELECT row_version FROM core.work_products WHERE id = $1`, f.workProductID).Scan(&rowVersion); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.projects.RetireWorkProduct(ctx, f.actor, f.projectID, f.workProductID, rowVersion); err != nil {
+		t.Fatalf("виведення артефакту під час review: %v", err)
+	}
+	if got := f.requestStatus(t, req.ID); got != "superseded" {
+		t.Fatalf("відкритий review request після retirement = %s, очікувано superseded", got)
 	}
 }
 

@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"delmos/internal/economics"
 	"delmos/internal/migrate"
 	"delmos/internal/testsupport"
 )
@@ -106,8 +107,8 @@ func TestSeededDefinitionsAreTyped(t *testing.T) {
 	if err != nil {
 		t.Fatalf("читання визначення EV: %v", err)
 	}
-	if ev.Unit != "currency:EUR" {
-		t.Errorf("одиниця EV = %q, очікувано currency:EUR", ev.Unit)
+	if ev.Unit != "currency" {
+		t.Errorf("сімейство одиниць EV = %q, очікувано currency", ev.Unit)
 	}
 	if !ev.RequiredForGate {
 		t.Error("EV має бути обов'язковою для фазового шлюзу")
@@ -142,8 +143,8 @@ func TestTypeMismatchRejectedByDatabase(t *testing.T) {
 	// economics.cpi оголошено як decimal, пробуємо записати його як boolean.
 	_, err := f.pool.Exec(context.Background(),
 		`INSERT INTO core.metric_observations
-		   (metric_key, value_type, project_id, quality, value_boolean)
-		 VALUES ('economics.cpi', 'boolean', $1, 'valid', true)`, f.project)
+		   (metric_key, value_type, unit, project_id, quality, value_boolean)
+		 VALUES ('economics.cpi', 'boolean', 'ratio', $1, 'valid', true)`, f.project)
 	if err == nil {
 		t.Fatal("СУБД прийняла значення типу, не оголошеного для метрики")
 	}
@@ -154,8 +155,8 @@ func TestTypeMismatchRejectedByDatabase(t *testing.T) {
 	// Правильний value_type, але значення покладено в чужу колонку.
 	_, err = f.pool.Exec(context.Background(),
 		`INSERT INTO core.metric_observations
-		   (metric_key, value_type, project_id, quality, value_boolean)
-		 VALUES ('economics.cpi', 'decimal', $1, 'valid', true)`, f.project)
+		   (metric_key, value_type, unit, project_id, quality, value_boolean)
+		 VALUES ('economics.cpi', 'decimal', 'ratio', $1, 'valid', true)`, f.project)
 	if err == nil {
 		t.Fatal("СУБД прийняла значення в колонці, що не відповідає типу")
 	}
@@ -170,8 +171,8 @@ func TestNoDataCannotCarryValue(t *testing.T) {
 	f := newFixture(t)
 	_, err := f.pool.Exec(context.Background(),
 		`INSERT INTO core.metric_observations
-		   (metric_key, value_type, project_id, quality, value_decimal, detail)
-		 VALUES ('economics.cpi', 'decimal', $1, 'no_data', 0, 'кошторис відсутній')`, f.project)
+		   (metric_key, value_type, unit, project_id, quality, value_decimal, detail)
+		 VALUES ('economics.cpi', 'decimal', 'ratio', $1, 'no_data', 0, 'кошторис відсутній')`, f.project)
 	if err == nil {
 		t.Fatal("СУБД дозволила записати значення для якості no_data")
 	}
@@ -184,8 +185,8 @@ func TestNoDataCannotCarryValue(t *testing.T) {
 func TestErrorRequiresDetail(t *testing.T) {
 	f := newFixture(t)
 	_, err := f.pool.Exec(context.Background(),
-		`INSERT INTO core.metric_observations (metric_key, value_type, project_id, quality)
-		 VALUES ('economics.cpi', 'decimal', $1, 'error')`, f.project)
+		`INSERT INTO core.metric_observations (metric_key, value_type, unit, project_id, quality)
+		 VALUES ('economics.cpi', 'decimal', 'ratio', $1, 'error')`, f.project)
 	if err == nil {
 		t.Fatal("СУБД дозволила помилкове вимірювання без пояснення")
 	}
@@ -307,5 +308,75 @@ func TestGateBlockersDetectBadQuality(t *testing.T) {
 	}
 	if len(blockers) != 0 {
 		t.Fatalf("після виправлення блокування = %v, очікувано порожньо", blockers)
+	}
+}
+
+func TestNewInputEventInvalidatesFreshObservation(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	for _, key := range []string{"economics.pv", "economics.ac", "economics.ev"} {
+		f.record(t, Observation{MetricKey: key, ProjectID: f.project, PhaseKey: "design",
+			Quality: QualityValid, Value: ptr("100.00"), ComputedAt: now})
+	}
+	if _, err := f.pool.Exec(ctx, `INSERT INTO core.event_outbox (event_key, project_id, envelope)
+		VALUES ('economics.inputs_changed', $1, '{}'::jsonb)`, f.project); err != nil {
+		t.Fatal(err)
+	}
+	blockers, err := GateBlockers(ctx, f.pool, f.project, "design", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(blockers) != 3 {
+		t.Fatalf("новий вхід має інвалідувати три метрики до перерахунку: %v", blockers)
+	}
+}
+
+func TestCurrencyUnitBelongsToObservation(t *testing.T) {
+	f := newFixture(t)
+	f.record(t, Observation{MetricKey: "economics.ac", ProjectID: f.project, PhaseKey: "design",
+		Quality: QualityValid, Value: ptr("100.00"), Unit: "currency:USD"})
+	obs, found, err := Latest(context.Background(), f.pool, f.project, "economics.ac", "design", time.Now().UTC())
+	if err != nil || !found || obs.Unit != "currency:USD" {
+		t.Fatalf("спостереження має зберегти фактичну валюту: %+v %v", obs, err)
+	}
+}
+
+func TestCollectorUsesBaselineCurrency(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	if _, err := f.pool.Exec(ctx, `INSERT INTO core.project_phases
+		(project_id, phase_key, name, status, config_generation)
+		VALUES ($1, 'design', 'Design', 'active', 1)`, f.project); err != nil {
+		t.Fatal(err)
+	}
+	var approver uuid.UUID
+	if err := f.pool.QueryRow(ctx, `INSERT INTO core.users (login, display_name, password_hash, is_active)
+		VALUES ('currency-checker'::citext, 'Currency checker', 'x', true) RETURNING id`).Scan(&approver); err != nil {
+		t.Fatal(err)
+	}
+	economicsStore := economics.New(f.pool)
+	baselineID, err := economicsStore.CreateCostBaseline(ctx, f.author, f.project, "USD baseline", "USD",
+		[]economics.BudgetLine{{PhaseKey: "design", CostCategory: "labor", PlannedAmount: "1000.00", FundingLimit: "1200.00"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := economicsStore.ApproveCostBaseline(ctx, baselineID, approver); err != nil {
+		t.Fatal(err)
+	}
+	tx, err := f.pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err := NewCollector(economicsStore).CollectEconomics(ctx, tx, f.project, uuid.New(), time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	obs, found, err := Latest(ctx, f.pool, f.project, "economics.ac", "design", time.Now().UTC())
+	if err != nil || !found || obs.Unit != "currency:USD" || obs.BaselineID == nil || *obs.BaselineID != baselineID {
+		t.Fatalf("USD baseline має дати USD-спостереження: %+v %v", obs, err)
 	}
 }

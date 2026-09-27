@@ -2,8 +2,48 @@ package project_test
 
 import (
 	"context"
+	"errors"
 	"testing"
+
+	"delmos/internal/automation"
 )
+
+func TestTraceCreateHonorsBeforeRule(t *testing.T) {
+	ctx := context.Background()
+	store, authStore := newTestStore(t)
+	actor := newTestUser(t, authStore, "trace-rule-author")
+	detail, err := store.CreateWithPlan(ctx, actor, "TRACE-RULE", "Trace project", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source, _, err := store.CreateWorkProduct(ctx, actor, detail.Project.ID, "SRC-1", "requirement", "Source", "body", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	target, _, err := store.CreateWorkProduct(ctx, actor, detail.Project.ID, "TGT-1", "requirement", "Target", "body", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = authStore.Pool().Exec(ctx, `INSERT INTO core.rule_definitions
+		(rule_key, trigger_key, enforcement_level, assert_condition)
+		VALUES ('rule.test.no_trace', 'trigger.core.before_trace_create', 'MANDATORY_VETO',
+		'{"predicate_key":"always_false"}')`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = store.CreateTraceLink(ctx, actor, detail.Project.ID, source.ID, target.ID, nil, nil, "verifies")
+	var violation *automation.RuleViolationError
+	if !errors.As(err, &violation) || violation.RuleKey != "rule.test.no_trace" {
+		t.Fatalf("before rule must veto trace creation: %v", err)
+	}
+	var links int
+	if err := authStore.Pool().QueryRow(ctx, `SELECT count(*) FROM core.trace_links WHERE project_id = $1`, detail.Project.ID).Scan(&links); err != nil {
+		t.Fatal(err)
+	}
+	if links != 0 {
+		t.Fatalf("veto must roll back trace link, found %d", links)
+	}
+}
 
 // TestTraverseTraceabilityDetectsCycle перевіряє GRP-01/GRP-02: рекурсивний
 // обхід графа повертає повний ланцюжок довільної глибини й коректно
@@ -38,6 +78,15 @@ func TestTraverseTraceabilityDetectsCycle(t *testing.T) {
 	}
 	if _, err := store.CreateTraceLink(ctx, userID, proj.Project.ID, c.ID, a.ID, nil, nil, "derives_from"); err != nil {
 		t.Fatalf("зв'язок C->A (замикає цикл): %v", err)
+	}
+	var createdEvents int
+	if err := authStore.Pool().QueryRow(ctx,
+		`SELECT count(*) FROM core.event_outbox WHERE project_id = $1 AND event_key = 'trace.link_created'`,
+		proj.Project.ID).Scan(&createdEvents); err != nil {
+		t.Fatalf("читання подій створення зв'язків: %v", err)
+	}
+	if createdEvents != 3 {
+		t.Fatalf("очікувано три trace.link_created, отримано %d", createdEvents)
 	}
 
 	entries, err := store.TraverseTraceability(ctx, proj.Project.ID, a.ID)

@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"delmos/internal/auth"
+	"delmos/internal/automation"
 	"delmos/internal/project"
 
 	"github.com/google/uuid"
@@ -67,11 +68,14 @@ func handleCreateTraceLink(authSvc *auth.Service, projects *project.Store) http.
 			return
 		}
 		link, err := projects.CreateTraceLink(r.Context(), actorID, projectID, request.SourceID, request.TargetID, request.SourceRevisionID, request.TargetRevisionID, request.RelationKind)
+		var violation *automation.RuleViolationError
 		switch {
 		case errors.Is(err, project.ErrInvalidTraceRelation), errors.Is(err, project.ErrTraceEndpointInvalid):
 			writeJSONError(w, http.StatusUnprocessableEntity, "invalid_trace_link", err.Error())
 		case errors.Is(err, project.ErrTraceLinkAlreadyExists):
 			writeJSONError(w, http.StatusConflict, "trace_link_exists", err.Error())
+		case errors.As(err, &violation):
+			writeJSONError(w, http.StatusUnprocessableEntity, "rule_rejected", err.Error())
 		case err != nil:
 			writeJSONError(w, http.StatusInternalServerError, "internal_error", "не вдалося створити зв'язок")
 		default:

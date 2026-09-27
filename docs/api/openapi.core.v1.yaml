@@ -600,6 +600,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '409': { description: No approved cost baseline for the project }
+        '422': { description: Incomplete cost data (missing labor rate or mixed currencies) }
   /projects/{project_id}/phases/{phase_key}/transition:
     post:
       operationId: transitionPhase
@@ -652,6 +653,33 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { description: Phase not found in project }
         '422': { description: Invalid transition or blocked by a mandatory rule }
+  /projects/{project_id}/milestones/{milestone_key}/accept:
+    post:
+      operationId: acceptMilestone
+      summary: Record an independent gate decision for a project milestone
+      x-required-permission: milestone.accept
+      description: >-
+        Accepts the milestone against the applied plan revision and the exact
+        approved revisions of all required deliverables. The approver cannot
+        be the author of the plan or any required deliverable. Returns the
+        same immutable decision on retry. Unsupported acceptance rules and
+        waivers do not silently pass.
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - name: milestone_key
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Accepted gate decision
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GateDecision' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { description: Milestone not found }
+        '422': { description: Plan not applied, missing evidence, self-decision, unsupported rule or mandatory rule veto }
   /projects/{project_id}/work-products/{work_product_id}/submit:
     post:
       operationId: submitWorkProduct
@@ -705,7 +733,7 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { description: Work product not found }
         '409': { description: An open review request already exists }
-        '422': { description: Not a draft, no revision, or assignee is the author }
+        '422': { description: Not a draft, no revision, assignee is the author or mandatory rule veto }
   /projects/{project_id}/work-products/{work_product_id}/reviews:
     post:
       operationId: reviewWorkProduct
@@ -749,7 +777,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { description: No permission, or not assigned as approver }
         '409': { description: Revision changed after the request was created }
-        '422': { description: No positive review yet, or the decider is the author }
+        '422': { description: No positive review yet, decider is the author or mandatory rule veto }
   /projects/{project_id}/work-products/{work_product_id}/request-changes:
     post:
       operationId: requestChangesOnWorkProduct
@@ -771,7 +799,7 @@ paths:
         '201': { description: Decision recorded, content: { application/json: { schema: { $ref: '#/components/schemas/ReviewDecision' } } } }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { description: No permission, or not assigned }
-        '422': { description: Reason missing, or not in review }
+        '422': { description: Reason missing, not in review or mandatory rule veto }
   /projects/{project_id}/economics/work-records:
     post:
       operationId: logWorkRecord
@@ -1225,7 +1253,7 @@ components:
       description: >-
         Immutable measurement (SWR-22.2). The value is transported as a decimal
         string and is absent entirely when quality is `no_data` or `error`.
-      required: [id, metric_key, value_type, project_id, quality, computed_at]
+      required: [id, metric_key, value_type, unit, project_id, quality, computed_at, source_version]
       properties:
         id: { type: string, format: uuid }
         metric_key:
@@ -1234,6 +1262,9 @@ components:
         value_type:
           type: string
           enum: [integer, decimal, duration, boolean, enum, distribution]
+        unit:
+          type: string
+          description: Exact observation unit (currency:EUR or currency:USD for monetary values).
         project_id: { type: string, format: uuid }
         phase_key:
           type: string
@@ -1248,6 +1279,19 @@ components:
           type: string
           description: Reason the measurement is unavailable. Required for `no_data` and `error`.
         computed_at: { type: string, format: date-time }
+        source_version: { type: integer, format: int64, minimum: 0 }
+        baseline_id: { type: string, format: uuid }
+        baseline_version: { type: integer }
+        config_generation: { type: integer, format: int64 }
+
+    GateDecision:
+      type: object
+      required: [id, milestone_key, outcome, config_generation]
+      properties:
+        id: { type: string, format: uuid }
+        milestone_key: { type: string }
+        outcome: { type: string, enum: [passed] }
+        config_generation: { type: integer, format: int64 }
 
     EarnedValueSnapshot:
       type: object

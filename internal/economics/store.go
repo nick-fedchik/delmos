@@ -69,7 +69,7 @@ func (s *Store) LogWorkRecord(ctx context.Context, rec WorkRecord) (WorkRecord, 
 
 	var phaseStatus string
 	err = tx.QueryRow(ctx,
-		`SELECT status FROM core.project_phases WHERE project_id = $1 AND phase_key = $2`,
+		`SELECT status FROM core.project_phases WHERE project_id = $1 AND phase_key = $2 FOR SHARE`,
 		rec.ProjectID, rec.PhaseKey).Scan(&phaseStatus)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return WorkRecord{}, ErrPhaseNotFound
@@ -136,6 +136,29 @@ func (s *Store) SetLaborRate(ctx context.Context, projectID *uuid.UUID, roleKey,
 	if projectID != nil {
 		if err := emitInputsChanged(ctx, tx, *projectID, uuid.Nil, "labor_rate"); err != nil {
 			return uuid.Nil, err
+		}
+	} else {
+		rows, err := tx.Query(ctx, `SELECT DISTINCT project_id FROM core.work_records WHERE role_key = $1`, roleKey)
+		if err != nil {
+			return uuid.Nil, fmt.Errorf("проєкти ставки: %w", err)
+		}
+		var affected []uuid.UUID
+		for rows.Next() {
+			var affectedProject uuid.UUID
+			if err := rows.Scan(&affectedProject); err != nil {
+				rows.Close()
+				return uuid.Nil, err
+			}
+			affected = append(affected, affectedProject)
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return uuid.Nil, err
+		}
+		for _, affectedProject := range affected {
+			if err := emitInputsChanged(ctx, tx, affectedProject, uuid.Nil, "labor_rate"); err != nil {
+				return uuid.Nil, err
+			}
 		}
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -257,7 +280,7 @@ func (s *Store) RecordExpense(ctx context.Context, projectID, actorID uuid.UUID,
 
 	var phaseStatus string
 	err = tx.QueryRow(ctx,
-		`SELECT status FROM core.project_phases WHERE project_id = $1 AND phase_key = $2`,
+		`SELECT status FROM core.project_phases WHERE project_id = $1 AND phase_key = $2 FOR SHARE`,
 		projectID, phaseKey).Scan(&phaseStatus)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return uuid.Nil, ErrPhaseNotFound

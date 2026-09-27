@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 
 	"delmos/internal/auth"
+	"delmos/internal/automation"
 	"delmos/internal/project"
 )
 
@@ -125,6 +126,7 @@ func handleRevisePlan(authSvc *auth.Service, projects *project.Store) http.Handl
 			return
 		}
 		detail, err := projects.RevisePlan(r.Context(), actorID, projectID, req.ExpectedRowVersion, req.Body, req.Manifest)
+		var violation *automation.RuleViolationError
 		switch {
 		case errors.Is(err, project.ErrInvalidPlanManifest):
 			writeJSONError(w, http.StatusUnprocessableEntity, "invalid_plan_manifest", err.Error())
@@ -132,6 +134,8 @@ func handleRevisePlan(authSvc *auth.Service, projects *project.Store) http.Handl
 			writeJSONError(w, http.StatusConflict, "version_conflict", err.Error())
 		case errors.Is(err, project.ErrPlanNotFound):
 			writeJSONError(w, http.StatusNotFound, "not_found", "план проєкту не знайдено")
+		case errors.Is(err, project.ErrWorkProductObsolete), errors.As(err, &violation):
+			writeJSONError(w, http.StatusUnprocessableEntity, "rule_rejected", err.Error())
 		case err != nil:
 			writeJSONError(w, http.StatusInternalServerError, "internal_error", "не вдалося створити ревізію плану")
 		default:

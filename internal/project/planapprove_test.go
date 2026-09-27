@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"delmos/internal/automation"
 	"delmos/internal/economics"
 	"delmos/internal/project"
 )
@@ -161,6 +162,60 @@ func TestApplyPlanRejectsUnapprovedNewerRevision(t *testing.T) {
 		f.actor, f.projectID, &newRevision, f.planRowVersion)
 	if !errors.Is(err, project.ErrPlanNotApproved) {
 		t.Errorf("очікувано ErrPlanNotApproved для нової ревізії, отримано %v", err)
+	}
+}
+
+func TestReviseApprovedPlanReturnsDraftAndPublishesRevision(t *testing.T) {
+	f := newPlanFixture(t)
+	f.approveLatestPlanRevision(t)
+	ctx := context.Background()
+	previousRevision := f.latestPlanRevision(t)
+	revised, err := f.projects.RevisePlan(ctx, f.actor, f.projectID, f.planRowVersion,
+		"оновлений план", project.DefaultGenericPlanManifest("Шлюз плану"))
+	if err != nil {
+		t.Fatalf("нова ревізія затвердженого плану: %v", err)
+	}
+	if revised.WorkProduct.Status != "draft" || f.wpStatusByID(t, f.planWorkProductID) != "draft" {
+		t.Fatalf("план має повернутися у draft: %+v", revised.WorkProduct)
+	}
+	if revised.Revision.ID == previousRevision {
+		t.Fatal("нова ревізія не створилася")
+	}
+	var eventCount int
+	if err := f.pool.QueryRow(ctx,
+		`SELECT count(*) FROM core.event_outbox WHERE project_id = $1 AND event_key = 'wp.revision_committed'
+		 AND envelope->'payload'->>'revision_id' = $2`, f.projectID, revised.Revision.ID.String()).Scan(&eventCount); err != nil {
+		t.Fatalf("читання події нової ревізії: %v", err)
+	}
+	if eventCount != 1 {
+		t.Fatalf("нова ревізія PLAN-001 має емітувати рівно одну wp.revision_committed, отримано %d", eventCount)
+	}
+	if _, err := f.projects.SubmitWorkProduct(ctx, f.actor, f.projectID, f.planWorkProductID,
+		[]project.ReviewAssignment{{UserID: f.reviewer, Role: "reviewer"}, {UserID: f.approver, Role: "approver"}}); err != nil {
+		t.Fatalf("нову ревізію плану можна повторно подати на рецензію: %v", err)
+	}
+}
+
+func TestRevisePlanSupersedesOpenReviewRequest(t *testing.T) {
+	f := newPlanFixture(t)
+	ctx := context.Background()
+	request, err := f.projects.SubmitWorkProduct(ctx, f.actor, f.projectID, f.planWorkProductID,
+		[]project.ReviewAssignment{{UserID: f.reviewer, Role: "reviewer"}, {UserID: f.approver, Role: "approver"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.refreshPlanRowVersion(t)
+	if _, err := f.projects.RevisePlan(ctx, f.actor, f.projectID, f.planRowVersion,
+		"наступна версія", project.DefaultGenericPlanManifest("Шлюз плану")); err != nil {
+		t.Fatal(err)
+	}
+	var status string
+	if err := f.pool.QueryRow(ctx,
+		`SELECT status FROM core.review_requests WHERE id = $1`, request.ID).Scan(&status); err != nil {
+		t.Fatal(err)
+	}
+	if status != "superseded" || f.wpStatusByID(t, f.planWorkProductID) != "draft" {
+		t.Fatalf("стара рецензія має бути superseded, а план draft: request=%s", status)
 	}
 }
 
@@ -361,5 +416,111 @@ func TestApplyPlanRejectsRemovingPhaseWithRecordedActivity(t *testing.T) {
 	}
 	if !f.hasPhase(t, "alpha") {
 		t.Error("фаза alpha мала лишитися — транзакція мала відкотитися")
+	}
+}
+
+func TestMilestoneAcceptanceOpensPhaseExit(t *testing.T) {
+	f := newPlanFixture(t)
+	manifest := planWithPhase("Шлюз плану", "alpha")
+	manifest.Milestones = []project.PlanMilestone{{
+		Key: "MS-1", Name: "Exit review", PhaseKey: "alpha", TargetDate: "2026-01-30",
+	}}
+	f.reviseManifest(t, "milestone", manifest)
+	f.approveLatestPlanRevision(t)
+	if _, err := f.projects.ApplyPlan(context.Background(), f.actor, f.projectID, nil, f.planRowVersion); err != nil {
+		t.Fatalf("застосування плану: %v", err)
+	}
+	control := time.Date(2026, 1, 20, 0, 0, 0, 0, time.UTC)
+	if _, err := f.projects.TransitionPhase(context.Background(), f.actor, f.projectID, "alpha", "active", control); err != nil {
+		t.Fatalf("активація: %v", err)
+	}
+	if _, err := f.projects.TransitionPhase(context.Background(), f.actor, f.projectID, "alpha", "completed", control); !errors.Is(err, project.ErrPhaseGateRejected) {
+		t.Fatalf("вихід без рішення мав бути заблокований: %v", err)
+	}
+	if _, err := f.projects.AcceptMilestone(context.Background(), f.actor, f.projectID, "MS-1"); !errors.Is(err, project.ErrSelfGateDecision) {
+		t.Fatalf("автор плану не може прийняти власну віху: %v", err)
+	}
+	if _, err := f.pool.Exec(context.Background(), `INSERT INTO core.rule_definitions
+		(rule_key, trigger_key, enforcement_level, assert_condition)
+		VALUES ('rule.test.no_accept', 'trigger.core.before_milestone_accept', 'MANDATORY_VETO',
+		'{"predicate_key":"always_false"}')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.projects.AcceptMilestone(context.Background(), f.approver, f.projectID, "MS-1"); err == nil {
+		t.Fatal("правило before_milestone_accept має заблокувати рішення")
+	} else {
+		var violation *automation.RuleViolationError
+		if !errors.As(err, &violation) || violation.RuleKey != "rule.test.no_accept" {
+			t.Fatalf("очікувано вето правила, отримано %v", err)
+		}
+	}
+	var decisions int
+	if err := f.pool.QueryRow(context.Background(),
+		`SELECT count(*) FROM core.gate_decisions WHERE project_id = $1`, f.projectID).Scan(&decisions); err != nil {
+		t.Fatal(err)
+	}
+	if decisions != 0 {
+		t.Fatalf("після вето не повинно бути GateDecision, знайдено %d", decisions)
+	}
+	if _, err := f.pool.Exec(context.Background(),
+		`UPDATE core.rule_definitions SET active = false WHERE rule_key = 'rule.test.no_accept'`); err != nil {
+		t.Fatal(err)
+	}
+	decision, err := f.projects.AcceptMilestone(context.Background(), f.approver, f.projectID, "MS-1")
+	if err != nil || decision.Outcome != "passed" {
+		t.Fatalf("незалежне приймання: decision=%+v err=%v", decision, err)
+	}
+	if _, err := f.pool.Exec(context.Background(), `UPDATE core.gate_decisions SET outcome = 'failed' WHERE id = $1`, decision.ID); err == nil {
+		t.Fatal("запис рішення має бути незмінним на рівні БД")
+	}
+	if _, err := f.projects.TransitionPhase(context.Background(), f.actor, f.projectID, "alpha", "completed", control); err != nil {
+		t.Fatalf("після формального рішення фазу можна завершити: %v", err)
+	}
+}
+
+func TestMilestoneDecisionCanBeRenewedAfterDeliverableRevision(t *testing.T) {
+	f := newPlanFixture(t)
+	var workProductID uuid.UUID
+	if err := f.pool.QueryRow(context.Background(), `INSERT INTO core.work_products
+		(project_id, code, type, profile, title, status)
+		VALUES ($1, 'REQ-GATE', 'requirement', 'core:requirement', 'Gate evidence', 'approved') RETURNING id`, f.projectID).Scan(&workProductID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.pool.Exec(context.Background(), `INSERT INTO core.work_product_revisions
+		(work_product_id, revision_number, body, metadata, payload_hash, content_hash, created_by)
+		VALUES ($1, 1, 'first', '{}'::jsonb, sha256('first'::bytea), sha256('first'::bytea), $2)`, workProductID, f.actor); err != nil {
+		t.Fatal(err)
+	}
+	manifest := planWithPhase("Gate", "alpha")
+	manifest.Deliverables = []project.Deliverable{{Key: "DEL-1", Name: "Evidence", WorkProductID: workProductID.String(), RequiredStatus: "approved"}}
+	manifest.Milestones = []project.PlanMilestone{{Key: "MS-1", Name: "Exit", PhaseKey: "alpha", TargetDate: "2026-01-30", DeliverableKeys: []string{"DEL-1"}}}
+	f.reviseManifest(t, "evidence", manifest)
+	f.approveLatestPlanRevision(t)
+	if _, err := f.projects.ApplyPlan(context.Background(), f.actor, f.projectID, nil, f.planRowVersion); err != nil {
+		t.Fatal(err)
+	}
+	control := time.Date(2026, 1, 20, 0, 0, 0, 0, time.UTC)
+	if _, err := f.projects.TransitionPhase(context.Background(), f.actor, f.projectID, "alpha", "active", control); err != nil {
+		t.Fatal(err)
+	}
+	first, err := f.projects.AcceptMilestone(context.Background(), f.approver, f.projectID, "MS-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.projects.ReviseWorkProduct(context.Background(), f.actor, f.projectID, workProductID, 1, "second", nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.projects.TransitionPhase(context.Background(), f.actor, f.projectID, "alpha", "completed", control); !errors.Is(err, project.ErrPhaseGateRejected) {
+		t.Fatalf("нова ревізія має скасувати чинність рішення: %v", err)
+	}
+	if _, err := f.pool.Exec(context.Background(), `UPDATE core.work_products SET status = 'approved' WHERE id = $1`, workProductID); err != nil {
+		t.Fatal(err)
+	}
+	second, err := f.projects.AcceptMilestone(context.Background(), f.approver, f.projectID, "MS-1")
+	if err != nil || first.ID == second.ID {
+		t.Fatalf("потрібне нове рішення на новий доказ: %+v %+v %v", first, second, err)
+	}
+	if _, err := f.projects.TransitionPhase(context.Background(), f.actor, f.projectID, "alpha", "completed", control); err != nil {
+		t.Fatal(err)
 	}
 }

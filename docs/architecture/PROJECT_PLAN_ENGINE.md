@@ -38,9 +38,9 @@ flowchart TD
         S1[1. Загальні відомості та цілі / Charter & Purpose]
         S2[2. Межі проєкту та результати / Scope & Deliverables]
         S3[3. Організаційна структура та ролі / Team & RACI]
-        S4[4. Методологія та процеси / Governance & Methodology]
+        S4[4. Правила змін / Governance]
         S5[5. Календарний графік: фази та віхи / Phases & Milestones]
-        S6[6. Бюджет та фінанси / Cost Baseline & Economics]
+        S6[6. Критерії приймання / Acceptance Rules]
         S7[7. Модулі та розширення проєкту / Modules & Extensions]
     end
     
@@ -57,57 +57,11 @@ flowchart TD
 
 ### Приклад структури маніфесту плану (`PLAN-001`)
 
-Цей приклад ілюструє цільову конфігурацію. Структурований маніфест є окремим
-типізованим записом ревізії, а не Markdown або довільним `metadata`. Базові
-секції Generic Plan не нав'язують методологію; ключі Scrum, ISO 26262 та
-економіки можуть з'явитися лише в `extensions` після активації відповідного
-модуля.
-
-```yaml
-schema_version: delmos.wp.v1
-id: "7208ecb7-2639-45f6-98b4-d628d654b301"
-project_id: "7208ecb7-2639-45f6-98b4-d628d654b300"
-code: PLAN-001
-type: plan
-profile: core:project_plan
-profile_version: "1.0.0"
-title: "План розробки модуля силової електроніки"
-status: draft
-classification: internal
-metadata:
-  plan_schema_version: "1.0.0"
-  purpose: "Розробка блоку керування інвертором тягового електроприводу"
-  scope:
-    in_scope: ["Системні вимоги", "Схемотехніка PCB", "Вбудоване ПЗ", "HIL-випробування"]
-    out_of_scope: ["Серійне виробництво корпусу"]
-  governance:
-    methodology: "hybrid" # scrum | waterfall | hybrid
-  phases:
-    - id: PH-01
-      name: "System & Safety Architecture"
-      planned_start: "2026-10-01"
-      planned_finish: "2026-11-30"
-      exit_milestones: [MS-01]
-  milestones:
-    - id: MS-01
-      type_key: "gate_review"
-      name: "Preliminary Design Review (PDR)"
-      target_date: "2026-11-30"
-      acceptance_rules:
-        - "All system requirements allocated to architecture blocks"
-        - "Safety goals confirmed with ASIL allocations"
-  modules:
-    active_module_ids:
-      - "methodology.waterfall"
-      - "compliance.iso26262"
-      - "management.economics"
-    extensions:
-      iso26262:
-        target_asil: "ASIL_C"
-      economics:
-        base_currency: "EUR"
-        contingency_percent: 10
-```
+Точний типізований приклад маніфесту наведено в
+[CORE-CONTRACT-002 §2](../specifications/CORE-CONTRACT-002-GENERIC-PROJECT-PLAN.md#2-структурований-маніфест).
+Маніфест зберігається окремо від Markdown і `metadata`; базові секції не
+нав'язують методологію або бюджет. Конфігурації Scrum, ISO 26262 та економіки
+належать лише до `extensions.<module_id>` активних модулів.
 
 ---
 

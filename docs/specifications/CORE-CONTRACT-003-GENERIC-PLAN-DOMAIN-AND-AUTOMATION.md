@@ -9,14 +9,21 @@
 
 ## 1. Джерела та принцип відбору
 
-Цей контракт є власним синтезом за офіційними описами:
+Нормативна база понять керування проєктом — серія ISO 21500 за
+[ADR-011](../architecture/decisions/ADR-011-iso-21500-series-normative-base.md):
+ISO 21500 (контекст), ISO 21502 (практики), ISO/TR 21506 (словник),
+ISO 21508 (здобута цінність) та ISO 21511 (ієрархічна структура робіт).
+Стандарти дають термінологію й настанови; поля, статуси, API та інваріанти
+цього контракту є проєктними рішеннями DELMOS, а не дослівними вимогами ISO.
+
+Для зіставлення практик додатково використовуються довідкові джерела:
 
 * [PMBOK Guide, Eighth Edition](https://www.pmi.org/standards/pmbok), PMI, листопад 2025: value delivery, tailoring та домени governance, scope, schedule, finance, stakeholders, resources і risk.
 * [SWEBOK Guide v4.0a](https://www.computer.org/education/bodies-of-knowledge/software-engineering), IEEE Computer Society, 2024, оновлення вересня 2025: 18 областей знань, включно з requirements, architecture, testing, operations, configuration management, management, process, quality і security.
 
-PMBOK визначає універсальні об'єкти управління проєктом. SWEBOK визначає
-інженерні докази та дисципліни, які можуть бути потрібні проєкту. Жодне джерело
-не обґрунтовує примусове застосування єдиної методології до всіх проєктів.
+PMBOK допомагає порівняти управлінські практики, а SWEBOK — інженерні
+дисципліни. Вони не є джерелом нормативної термінології DELMOS і не
+обґрунтовують примусове застосування єдиної методології до всіх проєктів.
 Тому Generic Plan дає нейтральні сутності й виконувані інваріанти, а Scrum,
 Lean, V-Fall, безпека, фінанси та інші спеціалізації належать модулям.
 

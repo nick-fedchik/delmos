@@ -141,6 +141,20 @@ func (s *Store) RecordDecision(ctx context.Context, actorID, projectID, workProd
 			return ReviewDecision{}, ErrNoPositiveReview
 		}
 	}
+	correlationID := uuid.New()
+	if kind != DecisionReview {
+		targetStatus := "approved"
+		if kind == DecisionRequestChanges {
+			targetStatus = "draft"
+		}
+		if err := automation.EnforceRules(ctx, tx, "trigger.core.before_wp_transition",
+			automation.EvalContext{Fields: map[string]any{
+				"status": wpStatus, "action": kind, "target_status": targetStatus,
+				"work_product_id": workProductID.String(), "revision_id": revisionID.String(),
+			}}, actorID, projectID, correlationID); err != nil {
+			return ReviewDecision{}, err
+		}
+	}
 
 	outcome := "positive"
 	if kind == DecisionRequestChanges {
@@ -158,7 +172,6 @@ func (s *Store) RecordDecision(ctx context.Context, actorID, projectID, workProd
 	}
 	decision.WorkProductState = newStatus
 
-	correlationID := uuid.New()
 	if _, err := tx.Exec(ctx,
 		`INSERT INTO core.audit_events (actor_user_id, action, scope_type, scope_id, outcome, detail, correlation_id)
 		 VALUES ($1, $2, 'project', $3, 'success', $4, $5)`,

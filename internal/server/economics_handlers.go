@@ -42,6 +42,10 @@ func handleEarnedValue(authSvc *auth.Service, store *economics.Store) http.Handl
 					"для проєкту немає затвердженого базового кошторису")
 				return
 			}
+			if errors.Is(err, economics.ErrIncompleteCostData) {
+				writeJSONError(w, http.StatusUnprocessableEntity, "incomplete_cost_data", err.Error())
+				return
+			}
 			writeJSONError(w, http.StatusInternalServerError, "internal_error",
 				"не вдалося розрахувати показники здобутої цінності")
 			return

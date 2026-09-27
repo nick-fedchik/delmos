@@ -10,6 +10,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -64,15 +65,21 @@ type Definition struct {
 // Observation — зафіксоване вимірювання. Поле Value заповнюється лише для
 // якостей valid та stale; для no_data та error значення не існує.
 type Observation struct {
-	ID         uuid.UUID `json:"id"`
-	MetricKey  string    `json:"metric_key"`
-	ValueType  string    `json:"value_type"`
-	ProjectID  uuid.UUID `json:"project_id"`
-	PhaseKey   string    `json:"phase_key,omitempty"`
-	Quality    string    `json:"quality"`
-	Value      *string   `json:"value,omitempty"`
-	Detail     string    `json:"detail,omitempty"`
-	ComputedAt time.Time `json:"computed_at"`
+	ID               uuid.UUID  `json:"id"`
+	MetricKey        string     `json:"metric_key"`
+	ValueType        string     `json:"value_type"`
+	Unit             string     `json:"unit"`
+	ProjectID        uuid.UUID  `json:"project_id"`
+	PhaseKey         string     `json:"phase_key,omitempty"`
+	Quality          string     `json:"quality"`
+	Value            *string    `json:"value,omitempty"`
+	Detail           string     `json:"detail,omitempty"`
+	ComputedAt       time.Time  `json:"computed_at"`
+	SourceVersion    int64      `json:"source_version"`
+	BaselineID       *uuid.UUID `json:"baseline_id,omitempty"`
+	BaselineVersion  *int       `json:"baseline_version,omitempty"`
+	ConfigGeneration *int64     `json:"config_generation,omitempty"`
+	inputVersion     *int64
 	// Кореляція з подією, що спричинила обчислення. Назовні не публікується.
 	CorrelationID uuid.UUID `json:"-"`
 }
@@ -101,13 +108,39 @@ func Record(ctx context.Context, q Querier, obs Observation) (uuid.UUID, error) 
 	if computedAt.IsZero() {
 		computedAt = time.Now().UTC()
 	}
+	unit := obs.Unit
+	if unit == "" {
+		unit = def.Unit
+		if unit == "currency" {
+			unit = "currency:EUR"
+			if obs.BaselineID != nil {
+				var currency string
+				if err := q.QueryRow(ctx, `SELECT currency FROM core.cost_baselines WHERE id = $1`, *obs.BaselineID).Scan(&currency); err != nil {
+					return uuid.Nil, err
+				}
+				unit = "currency:" + currency
+			}
+		}
+	}
+	if def.Unit != "currency" && unit != def.Unit ||
+		def.Unit == "currency" && (len(unit) != 12 || !strings.HasPrefix(unit, "currency:")) {
+		return uuid.Nil, fmt.Errorf("%w: одиниця %q несумісна з %q", ErrValueTypeMismatch, unit, def.Unit)
+	}
+	version := obs.inputVersion
+	if version == nil {
+		current, err := CurrentInputVersion(ctx, q, obs.ProjectID)
+		if err != nil {
+			return uuid.Nil, err
+		}
+		version = &current
+	}
 
 	var id uuid.UUID
 	err = q.QueryRow(ctx,
 		`INSERT INTO core.metric_observations
 		   (metric_key, value_type, project_id, phase_key, quality,
 		    value_integer, value_decimal, value_duration, value_boolean, value_enum, value_distribution,
-		    detail, computed_at, correlation_id)
+		    detail, computed_at, correlation_id, source_version, baseline_id, baseline_version, config_generation, unit)
 		 VALUES ($1, $2, $3, $4, $5,
 		         CASE WHEN $2 = 'integer'      THEN ($6::text)::bigint   END,
 		         CASE WHEN $2 = 'decimal'      THEN ($6::text)::numeric  END,
@@ -115,10 +148,11 @@ func Record(ctx context.Context, q Querier, obs Observation) (uuid.UUID, error) 
 		         CASE WHEN $2 = 'boolean'      THEN ($6::text)::boolean  END,
 		         CASE WHEN $2 = 'enum'         THEN  $6::text            END,
 		         CASE WHEN $2 = 'distribution' THEN ($6::text)::jsonb    END,
-		         $7, $8, $9)
+		         $7, $8, $9, $10, $11, $12, $13, $14)
 		 RETURNING id`,
 		obs.MetricKey, def.ValueType, obs.ProjectID, nullIfEmpty(obs.PhaseKey), obs.Quality,
-		obs.Value, nullIfEmpty(obs.Detail), computedAt, nullUUID(obs.CorrelationID)).Scan(&id)
+		obs.Value, nullIfEmpty(obs.Detail), computedAt, nullUUID(obs.CorrelationID),
+		*version, obs.BaselineID, obs.BaselineVersion, obs.ConfigGeneration, unit).Scan(&id)
 	if err != nil {
 		return uuid.Nil, fmt.Errorf("запис вимірювання %s: %w", obs.MetricKey, err)
 	}
@@ -135,21 +169,32 @@ func Latest(ctx context.Context, q Querier, projectID uuid.UUID, metricKey, phas
 	var value *string
 	var detail *string
 	var maxAge *int
+	var currentVersion int64
+	var currentBaseline *uuid.UUID
+	var currentBaselineVersion *int
+	var currentGeneration *int64
 
 	err := q.QueryRow(ctx,
-		`SELECT o.id, o.metric_key, o.value_type, o.project_id, o.phase_key, o.quality,
+		`SELECT o.id, o.metric_key, o.value_type, o.unit, o.project_id, o.phase_key, o.quality,
 		        COALESCE(o.value_integer::text, o.value_decimal::text, o.value_duration::text,
 		                 o.value_boolean::text, o.value_enum, o.value_distribution::text),
-		        o.detail, o.computed_at, d.max_age_seconds
+		        o.detail, o.computed_at, d.max_age_seconds, o.source_version,
+		        o.baseline_id, o.baseline_version, o.config_generation,
+		        COALESCE(iv.version, 0), cb.id, cb.version, b.config_generation
 		 FROM core.metric_observations o
 		 JOIN core.metric_definitions d ON d.metric_key = o.metric_key
+		 LEFT JOIN core.metric_input_versions iv ON iv.project_id = o.project_id
+		 LEFT JOIN core.cost_baselines cb ON cb.project_id = o.project_id AND cb.status = 'approved'
+		 LEFT JOIN core.project_plan_bindings b ON b.project_id = o.project_id
 		 WHERE o.project_id = $1 AND o.metric_key = $2
 		   AND o.phase_key IS NOT DISTINCT FROM $3
 		 ORDER BY o.computed_at DESC, o.created_at DESC
 		 LIMIT 1`,
 		projectID, metricKey, nullIfEmpty(phaseKey)).
-		Scan(&obs.ID, &obs.MetricKey, &obs.ValueType, &obs.ProjectID, &phase, &obs.Quality,
-			&value, &detail, &obs.ComputedAt, &maxAge)
+		Scan(&obs.ID, &obs.MetricKey, &obs.ValueType, &obs.Unit, &obs.ProjectID, &phase, &obs.Quality,
+			&value, &detail, &obs.ComputedAt, &maxAge, &obs.SourceVersion,
+			&obs.BaselineID, &obs.BaselineVersion, &obs.ConfigGeneration, &currentVersion,
+			&currentBaseline, &currentBaselineVersion, &currentGeneration)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Observation{}, false, nil
 	}
@@ -164,10 +209,26 @@ func Latest(ctx context.Context, q Querier, projectID uuid.UUID, metricKey, phas
 	if detail != nil {
 		obs.Detail = *detail
 	}
-	if obs.Quality == QualityValid && isStale(obs.ComputedAt, maxAge, asOf) {
+	if obs.Quality == QualityValid && (isStale(obs.ComputedAt, maxAge, asOf) || obs.SourceVersion != currentVersion ||
+		!sameOptional(obs.BaselineID, currentBaseline) || !sameOptional(obs.BaselineVersion, currentBaselineVersion) ||
+		!sameOptional(obs.ConfigGeneration, currentGeneration)) {
 		obs.Quality = QualityStale
 	}
 	return obs, true, nil
+}
+
+func sameOptional[T comparable](first, second *T) bool {
+	if first == nil || second == nil {
+		return first == nil && second == nil
+	}
+	return *first == *second
+}
+
+func CurrentInputVersion(ctx context.Context, q Querier, projectID uuid.UUID) (int64, error) {
+	var version int64
+	err := q.QueryRow(ctx, `SELECT COALESCE((SELECT version FROM core.metric_input_versions
+		WHERE project_id = $1), 0)`, projectID).Scan(&version)
+	return version, err
 }
 
 // GateBlockers повертає метрики, що блокують фазовий шлюз: обов'язкові для

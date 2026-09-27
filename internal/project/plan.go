@@ -357,6 +357,18 @@ func (s *Store) RevisePlan(ctx context.Context, actorID, projectID uuid.UUID, ex
 	if wp.RowVersion != expectedRowVersion {
 		return PlanDetail{}, ErrVersionConflict
 	}
+	correlationID := uuid.New()
+	if err := automation.EnforceRules(ctx, tx, "trigger.core.before_wp_transition",
+		automation.EvalContext{Fields: map[string]any{
+			"status": wp.Status, "action": "plan.revise", "target_status": "draft",
+			"work_product_id": wp.ID.String(),
+		}}, actorID, projectID, correlationID); err != nil {
+		var violation *automation.RuleViolationError
+		if errors.As(err, &violation) && violation.RuleKey == "rule.core.no_revision_when_obsolete" {
+			return PlanDetail{}, ErrWorkProductObsolete
+		}
+		return PlanDetail{}, err
+	}
 
 	for _, deliverable := range manifest.Deliverables {
 		if deliverable.WorkProductID == "" {
@@ -391,19 +403,28 @@ func (s *Store) RevisePlan(ctx context.Context, actorID, projectID uuid.UUID, ex
 	if _, err := tx.Exec(ctx, `INSERT INTO core.project_plan_manifests (revision_id, template_key, template_version, manifest, manifest_hash) VALUES ($1, $2, $3, $4, $5)`, revision.ID, genericPlanTemplateKey, genericPlanTemplateVersion, manifest, manifestHash); err != nil {
 		return PlanDetail{}, fmt.Errorf("збереження маніфесту плану: %w", err)
 	}
-	if tag, err := tx.Exec(ctx, `UPDATE core.work_products SET row_version = row_version + 1 WHERE id = $1 AND row_version = $2`, wp.ID, expectedRowVersion); err != nil || tag.RowsAffected() == 0 {
+	if tag, err := tx.Exec(ctx, `UPDATE core.work_products SET row_version = row_version + 1, status = 'draft' WHERE id = $1 AND row_version = $2`, wp.ID, expectedRowVersion); err != nil || tag.RowsAffected() == 0 {
 		if err != nil {
 			return PlanDetail{}, fmt.Errorf("оновлення версії плану: %w", err)
 		}
 		return PlanDetail{}, ErrVersionConflict
 	}
+	if err := supersedeOpenReviewRequest(ctx, tx, wp.ID); err != nil {
+		return PlanDetail{}, err
+	}
 	if err := s.recordProjectAuditTx(ctx, tx, actorID, projectID, "plan.revise", map[string]any{"revision_number": revision.RevisionNumber}); err != nil {
+		return PlanDetail{}, err
+	}
+	if err := automation.EmitEvent(ctx, tx, "wp.revision_committed", &projectID, &actorID, correlationID,
+		map[string]any{"work_product_id": wp.ID.String(), "revision_id": revision.ID.String(),
+			"code": wp.Code, "type": wp.Type}); err != nil {
 		return PlanDetail{}, err
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return PlanDetail{}, fmt.Errorf("фіксація ревізії плану: %w", err)
 	}
 	wp.RowVersion++
+	wp.Status = "draft"
 	return PlanDetail{WorkProduct: wp, Revision: revision, Manifest: manifest, TemplateKey: genericPlanTemplateKey, TemplateVersion: genericPlanTemplateVersion}, nil
 }
 
@@ -571,6 +592,7 @@ func (s *Store) ApplyPlan(ctx context.Context, actorID, projectID uuid.UUID, rev
 			 SET phase_key = EXCLUDED.phase_key,
 			     name = EXCLUDED.name,
 			     target_date = EXCLUDED.target_date,
+			     status = 'pending',
 			     deliverable_keys = EXCLUDED.deliverable_keys,
 			     acceptance_rule_keys = EXCLUDED.acceptance_rule_keys,
 			     config_generation = EXCLUDED.config_generation`,

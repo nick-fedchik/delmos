@@ -163,6 +163,8 @@ func newRouter(logger *slog.Logger, deps Deps) http.Handler {
 		requireAuth(requireCSRF(logger, handleLinkPhaseDeliverable(deps.Auth, deps.Economics))))
 	mux.HandleFunc("POST /api/v1/projects/{project_id}/phases/{phase_key}/transition",
 		requireAuth(requireCSRF(logger, handleTransitionPhase(deps.Auth, deps.Projects))))
+	mux.HandleFunc("POST /api/v1/projects/{project_id}/milestones/{milestone_key}/accept",
+		requireAuth(requireCSRF(logger, handleAcceptMilestone(deps.Auth, deps.Projects))))
 	mux.HandleFunc("POST /api/v1/projects/{project_id}/work-products/{work_product_id}/submit",
 		requireAuth(requireCSRF(logger, handleSubmitWorkProduct(deps.Auth, deps.Projects))))
 	mux.HandleFunc("POST /api/v1/projects/{project_id}/work-products/{work_product_id}/reviews",

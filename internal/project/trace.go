@@ -7,6 +7,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+
+	"delmos/internal/automation"
 )
 
 var (
@@ -62,6 +64,14 @@ func (s *Store) CreateTraceLink(ctx context.Context, actorID, projectID, sourceI
 	if err := validateTraceEndpoint(ctx, tx, projectID, targetID, targetRevisionID); err != nil {
 		return TraceLink{}, err
 	}
+	correlationID := uuid.New()
+	if err := automation.EnforceRules(ctx, tx, "trigger.core.before_trace_create",
+		automation.EvalContext{Fields: map[string]any{
+			"action": "trace.create", "source_id": sourceID.String(), "target_id": targetID.String(),
+			"relation_kind": relationKind,
+		}}, actorID, projectID, correlationID); err != nil {
+		return TraceLink{}, err
+	}
 
 	var link TraceLink
 	err = tx.QueryRow(ctx,
@@ -82,8 +92,13 @@ func (s *Store) CreateTraceLink(ctx context.Context, actorID, projectID, sourceI
 	if _, err := tx.Exec(ctx,
 		`INSERT INTO core.audit_events (actor_user_id, action, scope_type, scope_id, outcome, detail, correlation_id)
 		 VALUES ($1, 'trace.create', 'project', $2, 'success', $3, $4)`,
-		actorID, projectID, map[string]any{"trace_link_id": link.ID.String(), "relation_kind": relationKind}, uuid.New()); err != nil {
+		actorID, projectID, map[string]any{"trace_link_id": link.ID.String(), "relation_kind": relationKind}, correlationID); err != nil {
 		return TraceLink{}, fmt.Errorf("запис аудиторської події зв'язку: %w", err)
+	}
+	if err := automation.EmitEvent(ctx, tx, "trace.link_created", &projectID, &actorID, correlationID,
+		map[string]any{"trace_link_id": link.ID.String(), "source_id": sourceID.String(),
+			"target_id": targetID.String(), "relation_kind": relationKind}); err != nil {
+		return TraceLink{}, err
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return TraceLink{}, fmt.Errorf("фіксація зв'язку простежуваності: %w", err)

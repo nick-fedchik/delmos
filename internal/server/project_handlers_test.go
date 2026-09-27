@@ -120,8 +120,25 @@ func TestPlanEndpointCreatesStructuredRevision(t *testing.T) {
 	}
 
 	plan.Manifest.Phases = []project.PlanPhase{{Key: "PH-001", Name: "Delivery", PlannedStart: "2026-10-01", PlannedFinish: "2026-10-31"}}
+	if _, err := store.Pool().Exec(context.Background(), `INSERT INTO core.rule_definitions
+		(rule_key, trigger_key, enforcement_level, when_condition, assert_condition)
+		VALUES ('rule.test.http_plan_revise', 'trigger.core.before_wp_transition', 'MANDATORY_VETO',
+		'{"predicate_key":"field_equals","params":{"field":"action","value":"plan.revise"}}',
+		'{"predicate_key":"always_false"}')`); err != nil {
+		t.Fatal(err)
+	}
+	planURL := "/api/v1/projects/" + createdProject.ID + "/plan/revisions"
+	revisionInput := map[string]any{"expected_row_version": plan.RowVersion, "body": "# Plan\n", "manifest": plan.Manifest}
+	veto := doJSON(t, handler, http.MethodPost, planURL, revisionInput, cookie, csrfToken)
+	if veto.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("вето ревізії плану має дати 422, отримано %d: %s", veto.Code, veto.Body.String())
+	}
+	if _, err := store.Pool().Exec(context.Background(),
+		`UPDATE core.rule_definitions SET active = false WHERE rule_key = 'rule.test.http_plan_revise'`); err != nil {
+		t.Fatal(err)
+	}
 	revise := doJSON(t, handler, http.MethodPost, "/api/v1/projects/"+createdProject.ID+"/plan/revisions",
-		map[string]any{"expected_row_version": plan.RowVersion, "body": "# Plan\n", "manifest": plan.Manifest}, cookie, csrfToken)
+		revisionInput, cookie, csrfToken)
 	if revise.Code != http.StatusCreated {
 		t.Fatalf("очікувався 201 для ревізії плану, отримано %d: %s", revise.Code, revise.Body.String())
 	}
