@@ -130,6 +130,104 @@ paths:
         '204': { description: Binding revoked (or already revoked — idempotent) }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
+  /admin/review-role-projects:
+    get:
+      operationId: searchReviewRoleProjects
+      summary: Find projects for system-admin role management
+      x-required-permission: access.grant
+      parameters:
+        - name: query
+          in: query
+          schema: { type: string }
+      responses:
+        '200':
+          description: Up to 50 matching projects
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/ReviewRoleProject' } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /admin/review-role-users:
+    get:
+      operationId: searchReviewRoleUsers
+      summary: Find active users other than the role-granting actor
+      x-required-permission: access.grant
+      parameters:
+        - name: query
+          in: query
+          required: true
+          schema: { type: string, minLength: 2, maxLength: 80 }
+      responses:
+        '200':
+          description: Up to 20 matching active users
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/ReviewRoleUser' } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /projects/{project_id}/review-role-bindings:
+    get:
+      operationId: listProjectReviewRoleBindings
+      summary: List active project reviewer and approver bindings
+      x-required-permission: access.grant or access.revoke
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      responses:
+        '200':
+          description: Active project review roles
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/ProjectReviewRoleBinding' } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      operationId: grantProjectReviewRole
+      summary: Grant only a reviewer or approver role in one project
+      x-required-permission: access.grant
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [user_id, role_key, reason]
+              properties:
+                user_id: { type: string, format: uuid }
+                role_key: { type: string, enum: [project.reviewer, project.approver] }
+                reason: { type: string, minLength: 1 }
+      responses:
+        '201':
+          description: Project-scoped binding created and audited
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id]
+                properties:
+                  id: { type: string, format: uuid }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/Hidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/Invariant' }
+  /projects/{project_id}/review-role-bindings/{binding_id}:
+    delete:
+      operationId: revokeProjectReviewRole
+      summary: Revoke a reviewer or approver role in its project scope
+      x-required-permission: access.revoke
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - $ref: '#/components/parameters/BindingId'
+        - $ref: '#/components/parameters/CsrfToken'
+      responses:
+        '204': { description: Project role revoked and audited }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/Hidden' }
   /projects:
     post:
       operationId: createProject
@@ -192,6 +290,55 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/PlanDetailView' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/Hidden' }
+  /projects/{project_id}/plan/review-candidates:
+    get:
+      operationId: listPlanReviewCandidates
+      summary: List eligible project reviewers and approvers excluding the revision author
+      x-required-permission: wp.submit
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      responses:
+        '200':
+          description: Active candidates in this project for the current plan revision
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/PlanReviewCandidate' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/Hidden' }
+  /projects/{project_id}/plan/review:
+    get:
+      operationId: getOpenPlanReview
+      summary: Read review progress for the current PLAN-001 revision
+      x-required-permission: project.read
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      responses:
+        '200':
+          description: Open request with assignments and positive review state
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OpenPlanReview' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/Hidden' }
+  /projects/{project_id}/plan/approval-evidence:
+    get:
+      operationId: listCurrentPlanApprovalEvidence
+      summary: Read positive review and approval for the current approved plan revision
+      x-required-permission: project.read
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      responses:
+        '200':
+          description: Decisions on the exact current revision and matching payload hash
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/PlanApprovalEvidence' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/Hidden' }
   /projects/{project_id}/plan/revisions:
@@ -560,6 +707,32 @@ components:
             code: { type: string }
             message: { type: string }
 
+    ReviewRoleProject:
+      type: object
+      required: [id, code, name]
+      properties:
+        id: { type: string, format: uuid }
+        code: { type: string }
+        name: { type: string }
+
+    ReviewRoleUser:
+      type: object
+      required: [id, login, display_name]
+      properties:
+        id: { type: string, format: uuid }
+        login: { type: string }
+        display_name: { type: string }
+
+    ProjectReviewRoleBinding:
+      type: object
+      required: [id, user_id, login, display_name, role_key]
+      properties:
+        id: { type: string, format: uuid }
+        user_id: { type: string, format: uuid }
+        login: { type: string }
+        display_name: { type: string }
+        role_key: { type: string, enum: [project.reviewer, project.approver] }
+
     BootStatusResponse:
       type: object
       required: [status, version, components]
@@ -646,6 +819,42 @@ components:
         template_key: { type: string, const: generic-project-plan }
         template_version: { type: integer, const: 1 }
         manifest: { $ref: '#/components/schemas/GenericPlanManifest' }
+
+    PlanReviewCandidate:
+      type: object
+      required: [id, login, display_name, can_review, can_approve]
+      properties:
+        id: { type: string, format: uuid }
+        login: { type: string }
+        display_name: { type: string }
+        can_review: { type: boolean }
+        can_approve: { type: boolean }
+
+    OpenPlanReview:
+      type: object
+      required: [revision_id, participants, has_positive_review]
+      properties:
+        revision_id: { type: string, format: uuid }
+        has_positive_review: { type: boolean }
+        participants:
+          type: array
+          items:
+            type: object
+            required: [display_name, role, completed, assigned_to_me]
+            properties:
+              display_name: { type: string }
+              role: { type: string, enum: [reviewer, approver] }
+              completed: { type: boolean }
+              assigned_to_me: { type: boolean }
+
+    PlanApprovalEvidence:
+      type: object
+      required: [revision_id, decision_kind, display_name, decided_at]
+      properties:
+        revision_id: { type: string, format: uuid }
+        decision_kind: { type: string, enum: [review, approval] }
+        display_name: { type: string }
+        decided_at: { type: string, format: date-time }
 
     ReviseProjectPlan:
       type: object

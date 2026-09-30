@@ -13,11 +13,12 @@ import (
 )
 
 var (
-	ErrReviewRequestOpen    = errors.New("артефакт уже подано на рецензію")
-	ErrNotDraft             = errors.New("подати на рецензію можна лише чернетку")
-	ErrNoRevision           = errors.New("артефакт не має жодної ревізії")
-	ErrAssigneeIsAuthor     = errors.New("автор ревізії не може бути рецензентом або погоджувачем")
-	ErrReviewRequestMissing = errors.New("відкритого запиту на рецензію не знайдено")
+	ErrReviewRequestOpen        = errors.New("артефакт уже подано на рецензію")
+	ErrNotDraft                 = errors.New("подати на рецензію можна лише чернетку")
+	ErrNoRevision               = errors.New("артефакт не має жодної ревізії")
+	ErrAssigneeIsAuthor         = errors.New("автор ревізії не може бути рецензентом або погоджувачем")
+	ErrReviewAssignmentsInvalid = errors.New("потрібні рецензент і погоджувач із чинними правами в цьому проєкті")
+	ErrReviewRequestMissing     = errors.New("відкритого запиту на рецензію не знайдено")
 )
 
 type ReviewRequest struct {
@@ -28,6 +29,61 @@ type ReviewRequest struct {
 	Status        string    `json:"status"`
 	RequestedBy   uuid.UUID `json:"requested_by"`
 	CreatedAt     time.Time `json:"created_at"`
+}
+
+type ReviewParticipant struct {
+	UserID       uuid.UUID `json:"-"`
+	DisplayName  string    `json:"display_name"`
+	Role         string    `json:"role"`
+	Completed    bool      `json:"completed"`
+	AssignedToMe bool      `json:"assigned_to_me"`
+}
+
+type OpenPlanReview struct {
+	RevisionID        uuid.UUID           `json:"revision_id"`
+	Participants      []ReviewParticipant `json:"participants"`
+	HasPositiveReview bool                `json:"has_positive_review"`
+}
+
+func (s *Store) GetOpenPlanReview(ctx context.Context, projectID, workProductID, revisionID uuid.UUID) (OpenPlanReview, error) {
+	var requestID uuid.UUID
+	var review OpenPlanReview
+	err := s.pool.QueryRow(ctx,
+		`SELECT id, revision_id FROM core.review_requests
+		 WHERE project_id = $1 AND work_product_id = $2 AND revision_id = $3 AND status = 'open'`,
+		projectID, workProductID, revisionID).Scan(&requestID, &review.RevisionID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return OpenPlanReview{}, ErrReviewRequestMissing
+	}
+	if err != nil {
+		return OpenPlanReview{}, fmt.Errorf("читання відкритого погодження плану: %w", err)
+	}
+
+	rows, err := s.pool.Query(ctx,
+		`SELECT ra.user_id, u.display_name, ra.assignment_role,
+		        EXISTS (SELECT 1 FROM core.review_decisions d
+		                WHERE d.review_request_id = ra.review_request_id AND d.decided_by = ra.user_id
+		                  AND d.decision_kind = CASE WHEN ra.assignment_role = 'reviewer' THEN 'review' ELSE 'approval' END
+		                  AND d.outcome = 'positive')
+		 FROM core.review_assignments ra JOIN core.users u ON u.id = ra.user_id
+		 WHERE ra.review_request_id = $1 ORDER BY ra.assignment_role, u.display_name`, requestID)
+	if err != nil {
+		return OpenPlanReview{}, fmt.Errorf("читання учасників погодження плану: %w", err)
+	}
+	defer rows.Close()
+
+	review.Participants = []ReviewParticipant{}
+	for rows.Next() {
+		var participant ReviewParticipant
+		if err := rows.Scan(&participant.UserID, &participant.DisplayName, &participant.Role, &participant.Completed); err != nil {
+			return OpenPlanReview{}, fmt.Errorf("розбір учасників погодження плану: %w", err)
+		}
+		if participant.Role == "reviewer" && participant.Completed {
+			review.HasPositiveReview = true
+		}
+		review.Participants = append(review.Participants, participant)
+	}
+	return review, rows.Err()
 }
 
 // ReviewAssignment — призначення особи на конкретний запит. Наявність дозволу
@@ -45,7 +101,7 @@ type ReviewAssignment struct {
 // щоб самопризначення не дійшло до стадії рішення.
 func (s *Store) SubmitWorkProduct(ctx context.Context, actorID, projectID, workProductID uuid.UUID, assignments []ReviewAssignment) (ReviewRequest, error) {
 	if len(assignments) == 0 {
-		return ReviewRequest{}, fmt.Errorf("%w: потрібні призначення рецензента й погоджувача", ErrAssigneeIsAuthor)
+		return ReviewRequest{}, ErrReviewAssignmentsInvalid
 	}
 
 	tx, err := s.pool.Begin(ctx)
@@ -82,10 +138,39 @@ func (s *Store) SubmitWorkProduct(ctx context.Context, actorID, projectID, workP
 		return ReviewRequest{}, fmt.Errorf("читання останньої ревізії: %w", err)
 	}
 
+	roles := map[string]bool{}
+	assigned := map[ReviewAssignment]bool{}
 	for _, a := range assignments {
 		if a.UserID == revisionAuthor {
 			return ReviewRequest{}, fmt.Errorf("%w: %s", ErrAssigneeIsAuthor, a.Role)
 		}
+		if (a.Role != "reviewer" && a.Role != "approver") || assigned[a] {
+			return ReviewRequest{}, ErrReviewAssignmentsInvalid
+		}
+		assigned[a] = true
+		roles[a.Role] = true
+		permission := "wp.review"
+		if a.Role == "approver" {
+			permission = "wp.approve"
+		}
+		var assignee uuid.UUID
+		err := tx.QueryRow(ctx,
+			`SELECT u.id FROM core.role_bindings rb
+			 JOIN core.users u ON u.id = rb.user_id
+			 JOIN core.role_definitions rd ON rd.key = rb.role_key
+			 WHERE rb.user_id = $1 AND rb.scope_type = 'project' AND rb.scope_id = $2
+			   AND rb.revoked_at IS NULL AND (rb.expires_at IS NULL OR rb.expires_at > now())
+			   AND u.is_active AND $3 = ANY(rd.permission_keys)
+			 LIMIT 1 FOR SHARE OF rb, u`, a.UserID, projectID, permission).Scan(&assignee)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ReviewRequest{}, ErrReviewAssignmentsInvalid
+		}
+		if err != nil {
+			return ReviewRequest{}, fmt.Errorf("перевірка призначеного учасника: %w", err)
+		}
+	}
+	if !roles["reviewer"] || !roles["approver"] {
+		return ReviewRequest{}, ErrReviewAssignmentsInvalid
 	}
 	correlationID := uuid.New()
 	if err := automation.EnforceRules(ctx, tx, "trigger.core.before_wp_transition",

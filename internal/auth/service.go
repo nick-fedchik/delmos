@@ -118,6 +118,30 @@ func (s *Service) ActiveProjectPermissions(ctx context.Context, userID, projectI
 	return s.store.ActiveProjectPermissions(ctx, userID, projectID)
 }
 
+func (s *Service) ListProjectReviewCandidates(ctx context.Context, projectID, revisionAuthorID uuid.UUID) ([]ReviewCandidate, error) {
+	return s.store.ListProjectReviewCandidates(ctx, projectID, revisionAuthorID)
+}
+
+func (s *Service) SearchReviewRoleProjects(ctx context.Context, query string) ([]ReviewRoleProject, error) {
+	return s.store.SearchReviewRoleProjects(ctx, query)
+}
+
+func (s *Service) SearchReviewRoleUsers(ctx context.Context, query string, actorID uuid.UUID) ([]ReviewRoleUser, error) {
+	return s.store.SearchReviewRoleUsers(ctx, query, actorID)
+}
+
+func (s *Service) ListProjectReviewRoleBindings(ctx context.Context, projectID uuid.UUID) ([]ProjectReviewRoleBinding, error) {
+	return s.store.ListProjectReviewRoleBindings(ctx, projectID)
+}
+
+func (s *Service) GrantProjectReviewRole(ctx context.Context, actorID, userID, projectID uuid.UUID, roleKey, reason string) (uuid.UUID, error) {
+	return s.store.GrantProjectReviewRole(ctx, actorID, userID, projectID, roleKey, reason)
+}
+
+func (s *Service) RevokeProjectReviewRole(ctx context.Context, actorID, projectID, bindingID uuid.UUID) (bool, error) {
+	return s.store.RevokeProjectReviewRole(ctx, actorID, projectID, bindingID)
+}
+
 // GrantSystemRole видає System-scope RoleBinding; повертає ErrRoleUnknown чи
 // ErrUserUnknown, якщо роль або отримувач не існують (SWR-43).
 func (s *Service) GrantSystemRole(ctx context.Context, granterID, userID uuid.UUID, roleKey, reason string) (uuid.UUID, error) {

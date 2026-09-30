@@ -37,6 +37,16 @@ func TestEarnedValueBecomesNonZeroAfterApproval(t *testing.T) {
 	reviewer := mustUser(t, pool, "reviewer")
 	approver := mustUser(t, pool, "approver")
 	projectID := mustProject(t, pool, author)
+	for _, assignment := range []struct {
+		userID  uuid.UUID
+		roleKey string
+	}{{reviewer, "project.reviewer"}, {approver, "project.approver"}} {
+		if _, err := pool.Exec(ctx,
+			`INSERT INTO core.role_bindings (user_id, role_key, scope_type, scope_id, granted_by, granted_reason)
+			 VALUES ($1, $2, 'project', $3, $4, 'test setup')`, assignment.userID, assignment.roleKey, projectID, author); err != nil {
+			t.Fatalf("роль учасника погодження: %v", err)
+		}
+	}
 	mustPhase(t, pool, projectID, "design")
 
 	baselineID, err := econ.CreateCostBaseline(ctx, author, projectID, "Базовий", "EUR",

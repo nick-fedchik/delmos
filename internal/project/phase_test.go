@@ -67,6 +67,15 @@ func (f *phaseFixture) user(t *testing.T, login string) uuid.UUID {
 	return id
 }
 
+func (f *phaseFixture) grantReviewRole(t *testing.T, userID uuid.UUID, roleKey string) {
+	t.Helper()
+	if _, err := f.pool.Exec(context.Background(),
+		`INSERT INTO core.role_bindings (user_id, role_key, scope_type, scope_id, granted_by, granted_reason)
+		 VALUES ($1, $2, 'project', $3, $4, 'test setup')`, userID, roleKey, f.projectID, f.actor); err != nil {
+		t.Fatalf("призначення %s у проєкті: %v", roleKey, err)
+	}
+}
+
 func (f *phaseFixture) project(t *testing.T) uuid.UUID {
 	t.Helper()
 	var id uuid.UUID

@@ -85,7 +85,6 @@ UUID, project scope, аудит і посилання на effective `config_gen
 
 ```json
 {
-  "manifest_version": "1.0.0",
   "objectives": [],
   "scope_items": [],
    "assumptions": [],

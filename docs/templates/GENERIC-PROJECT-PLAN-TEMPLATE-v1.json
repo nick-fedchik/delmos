@@ -3,13 +3,7 @@
   "template_version": 1,
   "name": "Generic Project Plan",
   "manifest": {
-    "objectives": [
-      {
-        "key": "OBJ-001",
-        "statement": "Deliver the project objective",
-        "success_criteria": []
-      }
-    ],
+    "objectives": [],
     "scope_items": [],
     "assumptions": [],
     "constraints": [],

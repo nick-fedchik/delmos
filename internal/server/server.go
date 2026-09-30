@@ -139,12 +139,25 @@ func newRouter(logger *slog.Logger, deps Deps) http.Handler {
 		requireAuth(requireCSRF(logger, handleGrantSystemRole(deps.Auth))))
 	mux.HandleFunc("DELETE /api/v1/role-bindings/{binding_id}",
 		requireAuth(requireCSRF(logger, handleRevokeRoleBinding(deps.Auth))))
+	mux.HandleFunc("GET /api/v1/admin/review-role-projects", requireAuth(handleSearchReviewRoleProjects(deps.Auth)))
+	mux.HandleFunc("GET /api/v1/admin/review-role-users", requireAuth(handleSearchReviewRoleUsers(deps.Auth)))
+	mux.HandleFunc("GET /api/v1/projects/{project_id}/review-role-bindings", requireAuth(handleListProjectReviewRoleBindings(deps.Auth)))
+	mux.HandleFunc("POST /api/v1/projects/{project_id}/review-role-bindings",
+		requireAuth(requireCSRF(logger, handleGrantProjectReviewRole(deps.Auth))))
+	mux.HandleFunc("DELETE /api/v1/projects/{project_id}/review-role-bindings/{binding_id}",
+		requireAuth(requireCSRF(logger, handleRevokeProjectReviewRole(deps.Auth))))
 	mux.HandleFunc("GET /api/v1/system/automation/status", requireAuth(handleAutomationStatus(deps.Automation)))
 
 	mux.HandleFunc("POST /api/v1/projects", requireAuth(requireCSRF(logger, handleCreateProject(deps.Projects))))
 	mux.HandleFunc("GET /api/v1/projects", requireAuth(handleListProjects(deps.Projects)))
 	mux.HandleFunc("GET /api/v1/projects/{project_id}", requireAuth(handleGetProject(deps.Auth, deps.Projects)))
 	mux.HandleFunc("GET /api/v1/projects/{project_id}/plan", requireAuth(handleGetPlan(deps.Auth, deps.Projects)))
+	mux.HandleFunc("GET /api/v1/projects/{project_id}/plan/review-candidates",
+		requireAuth(handleListPlanReviewCandidates(deps.Auth, deps.Projects)))
+	mux.HandleFunc("GET /api/v1/projects/{project_id}/plan/review",
+		requireAuth(handleGetPlanReview(deps.Auth, deps.Projects)))
+	mux.HandleFunc("GET /api/v1/projects/{project_id}/plan/approval-evidence",
+		requireAuth(handleGetPlanApprovalEvidence(deps.Auth, deps.Projects)))
 	mux.HandleFunc("GET /api/v1/projects/{project_id}/economics/earned-value",
 		requireAuth(handleEarnedValue(deps.Auth, deps.Economics)))
 	mux.HandleFunc("GET /api/v1/projects/{project_id}/metrics/observations",

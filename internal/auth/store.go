@@ -19,6 +19,14 @@ type User struct {
 	IsActive     bool
 }
 
+type ReviewCandidate struct {
+	ID          uuid.UUID `json:"id"`
+	Login       string    `json:"login"`
+	DisplayName string    `json:"display_name"`
+	CanReview   bool      `json:"can_review"`
+	CanApprove  bool      `json:"can_approve"`
+}
+
 type Session struct {
 	UserID     uuid.UUID
 	Login      string
@@ -127,7 +135,7 @@ func (s *Store) ActivePermissions(ctx context.Context, userID uuid.UUID) (map[st
 	rows, err := s.pool.Query(ctx,
 		`SELECT rd.permission_keys FROM core.role_bindings rb
 		 JOIN core.role_definitions rd ON rd.key = rb.role_key
-		 WHERE rb.user_id = $1 AND rb.revoked_at IS NULL
+		 WHERE rb.user_id = $1 AND rb.scope_type = 'system' AND rb.revoked_at IS NULL
 		   AND (rb.expires_at IS NULL OR rb.expires_at > now())`,
 		userID)
 	if err != nil {
@@ -188,6 +196,35 @@ func (s *Store) ActiveProjectPermissions(ctx context.Context, userID, projectID 
 	}
 
 	return permissions, rows.Err()
+}
+
+func (s *Store) ListProjectReviewCandidates(ctx context.Context, projectID, revisionAuthorID uuid.UUID) ([]ReviewCandidate, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT u.id, u.login, u.display_name,
+		        bool_or('wp.review' = ANY(rd.permission_keys)),
+		        bool_or('wp.approve' = ANY(rd.permission_keys))
+		 FROM core.users u
+		 JOIN core.role_bindings rb ON rb.user_id = u.id
+		 JOIN core.role_definitions rd ON rd.key = rb.role_key
+		 WHERE u.is_active AND u.id <> $2 AND rb.scope_type = 'project' AND rb.scope_id = $1
+		   AND rb.revoked_at IS NULL AND (rb.expires_at IS NULL OR rb.expires_at > now())
+		   AND ('wp.review' = ANY(rd.permission_keys) OR 'wp.approve' = ANY(rd.permission_keys))
+		 GROUP BY u.id, u.login, u.display_name ORDER BY u.display_name, u.login`,
+		projectID, revisionAuthorID)
+	if err != nil {
+		return nil, fmt.Errorf("читання кандидатів для погодження плану: %w", err)
+	}
+	defer rows.Close()
+
+	candidates := []ReviewCandidate{}
+	for rows.Next() {
+		var candidate ReviewCandidate
+		if err := rows.Scan(&candidate.ID, &candidate.Login, &candidate.DisplayName, &candidate.CanReview, &candidate.CanApprove); err != nil {
+			return nil, fmt.Errorf("розбір кандидатів для погодження плану: %w", err)
+		}
+		candidates = append(candidates, candidate)
+	}
+	return candidates, rows.Err()
 }
 
 // RoleExists перевіряє наявність ролі в каталозі перед видачею RoleBinding.

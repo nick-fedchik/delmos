@@ -14,12 +14,13 @@ import (
 )
 
 var (
-	ErrNotInReview      = errors.New("артефакт не перебуває на рецензії")
-	ErrNotAssigned      = errors.New("особу не призначено на цей запит у потрібній ролі")
-	ErrSelfDecision     = errors.New("автор ревізії не може ухвалювати щодо неї рішення")
-	ErrStaleRevision    = errors.New("ревізія змінилася після створення запиту")
-	ErrNoPositiveReview = errors.New("погодження потребує попередньої позитивної рецензії")
-	ErrReasonRequired   = errors.New("рішення «потрібні зміни» потребує причини")
+	ErrNotInReview               = errors.New("артефакт не перебуває на рецензії")
+	ErrNotAssigned               = errors.New("особу не призначено на цей запит у потрібній ролі")
+	ErrSelfDecision              = errors.New("автор ревізії не може ухвалювати щодо неї рішення")
+	ErrStaleRevision             = errors.New("ревізія змінилася після створення запиту")
+	ErrNoPositiveReview          = errors.New("погодження потребує попередньої позитивної рецензії")
+	ErrReasonRequired            = errors.New("рішення «потрібні зміни» потребує причини")
+	ErrDecisionOperationConflict = errors.New("ключ операції вже використано для іншого рішення")
 )
 
 const (
@@ -38,6 +39,40 @@ type ReviewDecision struct {
 	Reason           string    `json:"reason,omitempty"`
 	DecidedAt        time.Time `json:"decided_at"`
 	WorkProductState string    `json:"work_product_status"`
+}
+
+type PlanApprovalEvidence struct {
+	RevisionID   uuid.UUID `json:"revision_id"`
+	DecisionKind string    `json:"decision_kind"`
+	DisplayName  string    `json:"display_name"`
+	DecidedAt    time.Time `json:"decided_at"`
+}
+
+func (s *Store) ListCurrentPlanApprovalEvidence(ctx context.Context, projectID, workProductID, revisionID uuid.UUID) ([]PlanApprovalEvidence, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT rr.revision_id, d.decision_kind, u.display_name, d.decided_at
+		 FROM core.review_decisions d
+		 JOIN core.review_requests rr ON rr.id = d.review_request_id
+		 JOIN core.work_product_revisions revision ON revision.id = rr.revision_id
+		 JOIN core.users u ON u.id = d.decided_by
+		 WHERE rr.project_id = $1 AND rr.work_product_id = $2 AND rr.revision_id = $3
+		   AND rr.status = 'approved' AND d.outcome = 'positive'
+		   AND d.decision_kind IN ('review', 'approval')
+		   AND d.payload_hash = revision.payload_hash AND rr.payload_hash = revision.payload_hash
+		 ORDER BY d.decided_at, d.id`, projectID, workProductID, revisionID)
+	if err != nil {
+		return nil, fmt.Errorf("читання підтверджень плану: %w", err)
+	}
+	defer rows.Close()
+	evidence := []PlanApprovalEvidence{}
+	for rows.Next() {
+		var item PlanApprovalEvidence
+		if err := rows.Scan(&item.RevisionID, &item.DecisionKind, &item.DisplayName, &item.DecidedAt); err != nil {
+			return nil, fmt.Errorf("розбір підтверджень плану: %w", err)
+		}
+		evidence = append(evidence, item)
+	}
+	return evidence, rows.Err()
 }
 
 // requiredAssignment визначає, яке призначення потрібне для роду рішення.
@@ -71,7 +106,7 @@ func (s *Store) RecordDecision(ctx context.Context, actorID, projectID, workProd
 	// Повтор із тим самим ключем операції повертає попередній результат, а не
 	// другий підпис (ADR-009 §4).
 	if operationKey != "" {
-		existing, found, err := loadDecisionByOperationKey(ctx, tx, operationKey)
+		existing, found, err := loadDecisionByOperationKey(ctx, tx, operationKey, actorID, projectID, workProductID, kind, reason)
 		if err != nil {
 			return ReviewDecision{}, err
 		}
@@ -274,23 +309,29 @@ func applyDecisionEffect(ctx context.Context, tx pgx.Tx, kind string, requestID,
 	return "", fmt.Errorf("невідомий рід рішення %q", kind)
 }
 
-func loadDecisionByOperationKey(ctx context.Context, tx pgx.Tx, operationKey string) (ReviewDecision, bool, error) {
+func loadDecisionByOperationKey(ctx context.Context, tx pgx.Tx, operationKey string, actorID, projectID, workProductID uuid.UUID, kind, reason string) (ReviewDecision, bool, error) {
 	var d ReviewDecision
+	var storedProjectID, storedWorkProductID, currentRevisionID uuid.UUID
 	var storedReason *string
 	err := tx.QueryRow(ctx,
 		`SELECT d.id, d.review_request_id, d.revision_id, d.decision_kind, d.outcome,
-		        d.decided_by, d.reason, d.decided_at, wp.status
+		        d.decided_by, d.reason, d.decided_at, wp.status, rr.project_id, rr.work_product_id,
+		        (SELECT id FROM core.work_product_revisions WHERE work_product_id = rr.work_product_id
+		         ORDER BY revision_number DESC LIMIT 1)
 		 FROM core.review_decisions d
 		 JOIN core.review_requests rr ON rr.id = d.review_request_id
 		 JOIN core.work_products wp ON wp.id = rr.work_product_id
 		 WHERE d.operation_key = $1`, operationKey).
 		Scan(&d.ID, &d.ReviewRequestID, &d.RevisionID, &d.DecisionKind, &d.Outcome,
-			&d.DecidedBy, &storedReason, &d.DecidedAt, &d.WorkProductState)
+			&d.DecidedBy, &storedReason, &d.DecidedAt, &d.WorkProductState, &storedProjectID, &storedWorkProductID, &currentRevisionID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ReviewDecision{}, false, nil
 	}
 	if err != nil {
 		return ReviewDecision{}, false, fmt.Errorf("пошук рішення за ключем операції: %w", err)
+	}
+	if d.DecidedBy != actorID || storedProjectID != projectID || storedWorkProductID != workProductID || d.DecisionKind != kind || d.RevisionID != currentRevisionID || (storedReason == nil && reason != "") || (storedReason != nil && *storedReason != reason) {
+		return ReviewDecision{}, false, ErrDecisionOperationConflict
 	}
 	if storedReason != nil {
 		d.Reason = *storedReason

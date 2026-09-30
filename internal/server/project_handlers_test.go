@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
 	"golang.org/x/time/rate"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"delmos/internal/auth"
@@ -99,6 +101,230 @@ func TestCreateProjectCreatesPlanAtomically(t *testing.T) {
 	get := doJSON(t, handler, http.MethodGet, "/api/v1/projects/"+view.ID, nil, cookie, "")
 	if get.Code != http.StatusOK {
 		t.Fatalf("власник щойно створеного проєкту має мати доступ на читання, отримано %d", get.Code)
+	}
+}
+
+func TestPlanReviewCandidatesOnlyIncludeIndependentProjectReviewers(t *testing.T) {
+	handler, store := newProjectTestRouter(t)
+	cookie, csrf := loginAsProjectManager(t, handler, store)
+	created := createTestProject(t, handler, cookie, csrf, "PLAN-REVIEW-CANDIDATES")
+	pool := store.Pool()
+	bootstrapTestAdmin(t, store, "plan-reviewer", "Review-Pass-12345")
+	bootstrapTestAdmin(t, store, "plan-approver", "Approve-Pass-12345")
+	grantProjectRole(t, pool, store, "plan-reviewer", "project.reviewer", created.ID)
+	grantProjectRole(t, pool, store, "plan-approver", "project.approver", created.ID)
+	grantProjectRole(t, pool, store, "pm", "project.reviewer", created.ID)
+
+	path := "/api/v1/projects/" + created.ID + "/plan/review-candidates"
+	response := doJSON(t, handler, http.MethodGet, path, nil, cookie, "")
+	if response.Code != http.StatusOK {
+		t.Fatalf("очікувався список кандидатів, отримано %d: %s", response.Code, response.Body.String())
+	}
+	var candidates []auth.ReviewCandidate
+	if err := json.Unmarshal(response.Body.Bytes(), &candidates); err != nil {
+		t.Fatal(err)
+	}
+	if len(candidates) != 2 {
+		t.Fatalf("мають бути лише незалежні кандидати цього проєкту: %+v", candidates)
+	}
+	for _, candidate := range candidates {
+		switch candidate.Login {
+		case "plan-reviewer":
+			if !candidate.CanReview || candidate.CanApprove {
+				t.Errorf("невірні дозволи рецензента: %+v", candidate)
+			}
+		case "plan-approver":
+			if !candidate.CanApprove || candidate.CanReview {
+				t.Errorf("невірні дозволи погоджувача: %+v", candidate)
+			}
+		default:
+			t.Errorf("зайва особа у списку: %+v", candidate)
+		}
+	}
+	planResponse := doJSON(t, handler, http.MethodGet, "/api/v1/projects/"+created.ID+"/plan", nil, cookie, "")
+	var plan planDetailView
+	if err := json.Unmarshal(planResponse.Body.Bytes(), &plan); err != nil {
+		t.Fatal(err)
+	}
+	for _, candidate := range candidates {
+		if candidate.Login == "plan-reviewer" {
+			incomplete := doJSON(t, handler, http.MethodPost,
+				"/api/v1/projects/"+created.ID+"/work-products/"+plan.WorkProductID+"/submit",
+				map[string]any{"assignments": []map[string]string{{"user_id": candidate.ID.String(), "assignment_role": "reviewer"}}}, cookie, csrf)
+			if incomplete.Code != http.StatusUnprocessableEntity || !strings.Contains(incomplete.Body.String(), "invalid_assignments") {
+				t.Fatalf("неповне призначення має повернути 422 invalid_assignments: %d %s", incomplete.Code, incomplete.Body.String())
+			}
+			break
+		}
+	}
+	if current := doJSON(t, handler, http.MethodGet, "/api/v1/projects/"+created.ID+"/plan", nil, cookie, ""); !strings.Contains(current.Body.String(), `"status":"draft"`) {
+		t.Fatalf("після відмови план має лишатися чернеткою: %s", current.Body.String())
+	}
+
+	login := doJSON(t, handler, http.MethodPost, "/api/v1/auth/login",
+		map[string]string{"login": "plan-reviewer", "password": "Review-Pass-12345"}, nil, "")
+	if login.Code != http.StatusOK {
+		t.Fatalf("вхід рецензента: %d", login.Code)
+	}
+	unauthorized := doJSON(t, handler, http.MethodGet, path, nil, sessionCookieFromResponse(t, login), "")
+	if unauthorized.Code != http.StatusNotFound {
+		t.Fatalf("без wp.submit список не має розкриватися: %d", unauthorized.Code)
+	}
+}
+
+func TestAdminManagesProjectReviewRolesThroughHTTP(t *testing.T) {
+	handler, store := newProjectTestRouter(t)
+	adminCookie, csrf := loginAsProjectManager(t, handler, store)
+	created := createTestProject(t, handler, adminCookie, csrf, "ROLE-GUI-TEST")
+	bootstrapTestAdmin(t, store, "role-gui-reviewer", "Role-Review-Pass-1")
+	reviewer, err := store.FindActiveUserByLogin(context.Background(), "role-gui-reviewer")
+	if err != nil {
+		t.Fatal(err)
+	}
+	projects := doJSON(t, handler, http.MethodGet, "/api/v1/admin/review-role-projects?query=ROLE-GUI", nil, adminCookie, "")
+	if projects.Code != http.StatusOK || !strings.Contains(projects.Body.String(), created.ID) {
+		t.Fatalf("пошук проєкту: %d %s", projects.Code, projects.Body.String())
+	}
+	users := doJSON(t, handler, http.MethodGet, "/api/v1/admin/review-role-users?query=role-gui", nil, adminCookie, "")
+	if users.Code != http.StatusOK || !strings.Contains(users.Body.String(), reviewer.ID.String()) {
+		t.Fatalf("пошук користувача: %d %s", users.Code, users.Body.String())
+	}
+	path := "/api/v1/projects/" + created.ID + "/review-role-bindings"
+	request := map[string]string{"user_id": reviewer.ID.String(), "role_key": "project.reviewer", "reason": "Незалежна рецензія плану"}
+	if noCsrf := doJSON(t, handler, http.MethodPost, path, request, adminCookie, ""); noCsrf.Code != http.StatusForbidden {
+		t.Fatalf("видача без CSRF має бути заборонена: %d", noCsrf.Code)
+	}
+	createdBinding := doJSON(t, handler, http.MethodPost, path, request, adminCookie, csrf)
+	if createdBinding.Code != http.StatusCreated {
+		t.Fatalf("видача ролі: %d %s", createdBinding.Code, createdBinding.Body.String())
+	}
+	var binding roleBindingView
+	if err := json.Unmarshal(createdBinding.Body.Bytes(), &binding); err != nil {
+		t.Fatal(err)
+	}
+	if duplicate := doJSON(t, handler, http.MethodPost, path, request, adminCookie, csrf); duplicate.Code != http.StatusConflict {
+		t.Fatalf("дубль має бути відхилений: %d", duplicate.Code)
+	}
+	admin, err := store.FindActiveUserByLogin(context.Background(), "pm")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if self := doJSON(t, handler, http.MethodPost, path,
+		map[string]string{"user_id": admin.ID.String(), "role_key": "project.approver", "reason": "самопризначення"}, adminCookie, csrf); self.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("самопризначення має бути відхилено: %d", self.Code)
+	}
+	list := doJSON(t, handler, http.MethodGet, path, nil, adminCookie, "")
+	if list.Code != http.StatusOK || !strings.Contains(list.Body.String(), reviewer.Login) {
+		t.Fatalf("прив'язка не з'явилася: %d %s", list.Code, list.Body.String())
+	}
+	if wrongScope := doJSON(t, handler, http.MethodDelete,
+		"/api/v1/projects/"+uuid.NewString()+"/review-role-bindings/"+binding.ID, nil, adminCookie, csrf); wrongScope.Code != http.StatusNotFound {
+		t.Fatalf("відкликання за іншим проєктом має бути 404: %d", wrongScope.Code)
+	}
+	if revoke := doJSON(t, handler, http.MethodDelete, path+"/"+binding.ID, nil, adminCookie, csrf); revoke.Code != http.StatusNoContent {
+		t.Fatalf("відкликання ролі: %d %s", revoke.Code, revoke.Body.String())
+	}
+	list = doJSON(t, handler, http.MethodGet, path, nil, adminCookie, "")
+	if list.Code != http.StatusOK || strings.Contains(list.Body.String(), reviewer.Login) {
+		t.Fatalf("відкликана роль не має залишитися у списку: %d %s", list.Code, list.Body.String())
+	}
+	unauthorized := doJSON(t, handler, http.MethodGet, "/api/v1/admin/review-role-projects", nil, nil, "")
+	if unauthorized.Code != http.StatusUnauthorized {
+		t.Fatalf("список проєктів без сесії має бути закритим: %d", unauthorized.Code)
+	}
+}
+
+func TestPlanReviewProgressFollowsIndependentDecisions(t *testing.T) {
+	handler, store := newProjectTestRouter(t)
+	cookie, csrf := loginAsProjectManager(t, handler, store)
+	created := createTestProject(t, handler, cookie, csrf, "PLAN-REVIEW-PROGRESS")
+	pool := store.Pool()
+	bootstrapTestAdmin(t, store, "progress-reviewer", "Review-Pass-12345")
+	bootstrapTestAdmin(t, store, "progress-approver", "Approve-Pass-12345")
+	grantProjectRole(t, pool, store, "progress-reviewer", "project.reviewer", created.ID)
+	grantProjectRole(t, pool, store, "progress-approver", "project.approver", created.ID)
+	reviewer, err := store.FindActiveUserByLogin(context.Background(), "progress-reviewer")
+	if err != nil {
+		t.Fatal(err)
+	}
+	approver, err := store.FindActiveUserByLogin(context.Background(), "progress-approver")
+	if err != nil {
+		t.Fatal(err)
+	}
+	planResponse := doJSON(t, handler, http.MethodGet, "/api/v1/projects/"+created.ID+"/plan", nil, cookie, "")
+	var plan planDetailView
+	if err := json.Unmarshal(planResponse.Body.Bytes(), &plan); err != nil {
+		t.Fatal(err)
+	}
+	base := "/api/v1/projects/" + created.ID + "/work-products/" + plan.WorkProductID
+	assignments := map[string]any{"assignments": []map[string]string{
+		{"user_id": reviewer.ID.String(), "assignment_role": "reviewer"},
+		{"user_id": approver.ID.String(), "assignment_role": "approver"},
+	}}
+	if response := doJSON(t, handler, http.MethodPost, base+"/submit", assignments, cookie, csrf); response.Code != http.StatusCreated {
+		t.Fatalf("подання плану: %d %s", response.Code, response.Body.String())
+	}
+	path := "/api/v1/projects/" + created.ID + "/plan/review"
+	evidencePath := "/api/v1/projects/" + created.ID + "/plan/approval-evidence"
+	if before := doJSON(t, handler, http.MethodGet, evidencePath, nil, cookie, ""); before.Code != http.StatusNotFound {
+		t.Fatalf("до погодження не повинно бути підтверджень: %d", before.Code)
+	}
+	reviewerLogin := doJSON(t, handler, http.MethodPost, "/api/v1/auth/login",
+		map[string]string{"login": "progress-reviewer", "password": "Review-Pass-12345"}, nil, "")
+	var reviewerBody loginResponse
+	if err := json.Unmarshal(reviewerLogin.Body.Bytes(), &reviewerBody); err != nil {
+		t.Fatal(err)
+	}
+	reviewerCookie := sessionCookieFromResponse(t, reviewerLogin)
+	progress := doJSON(t, handler, http.MethodGet, path, nil, reviewerCookie, "")
+	if progress.Code != http.StatusOK {
+		t.Fatalf("стан погодження: %d %s", progress.Code, progress.Body.String())
+	}
+	var review project.OpenPlanReview
+	if err := json.Unmarshal(progress.Body.Bytes(), &review); err != nil {
+		t.Fatal(err)
+	}
+	if review.RevisionID.String() != plan.RevisionID || review.HasPositiveReview || len(review.Participants) != 2 {
+		t.Fatalf("неочікуваний початковий стан: %+v", review)
+	}
+	for _, participant := range review.Participants {
+		if participant.AssignedToMe != (participant.Role == "reviewer") {
+			t.Errorf("невірне призначення для рецензента: %+v", participant)
+		}
+	}
+	if response := doJSON(t, handler, http.MethodPost, base+"/reviews", map[string]string{"operation_key": "review-progress-key"}, reviewerCookie, reviewerBody.CSRFToken); response.Code != http.StatusCreated {
+		t.Fatalf("рецензія: %d %s", response.Code, response.Body.String())
+	}
+	progress = doJSON(t, handler, http.MethodGet, path, nil, cookie, "")
+	if err := json.Unmarshal(progress.Body.Bytes(), &review); err != nil || !review.HasPositiveReview {
+		t.Fatalf("позитивна рецензія не відображена: %+v, %v", review, err)
+	}
+	approverLogin := doJSON(t, handler, http.MethodPost, "/api/v1/auth/login",
+		map[string]string{"login": "progress-approver", "password": "Approve-Pass-12345"}, nil, "")
+	var approverBody loginResponse
+	if err := json.Unmarshal(approverLogin.Body.Bytes(), &approverBody); err != nil {
+		t.Fatal(err)
+	}
+	if conflict := doJSON(t, handler, http.MethodPost, base+"/approvals", map[string]string{"operation_key": "review-progress-key"}, sessionCookieFromResponse(t, approverLogin), approverBody.CSRFToken); conflict.Code != http.StatusConflict || !strings.Contains(conflict.Body.String(), "operation_conflict") {
+		t.Fatalf("ключ рецензента не повинен повертати погоджувачу його рішення: %d %s", conflict.Code, conflict.Body.String())
+	}
+	if response := doJSON(t, handler, http.MethodPost, base+"/approvals", nil, sessionCookieFromResponse(t, approverLogin), approverBody.CSRFToken); response.Code != http.StatusCreated {
+		t.Fatalf("погодження: %d %s", response.Code, response.Body.String())
+	}
+	evidenceResponse := doJSON(t, handler, http.MethodGet, evidencePath, nil, cookie, "")
+	if evidenceResponse.Code != http.StatusOK {
+		t.Fatalf("підтвердження погодженої ревізії: %d %s", evidenceResponse.Code, evidenceResponse.Body.String())
+	}
+	var evidence []project.PlanApprovalEvidence
+	if err := json.Unmarshal(evidenceResponse.Body.Bytes(), &evidence); err != nil {
+		t.Fatal(err)
+	}
+	if len(evidence) != 2 || evidence[0].DecisionKind != project.DecisionReview || evidence[1].DecisionKind != project.DecisionApproval ||
+		evidence[0].RevisionID.String() != plan.RevisionID || evidence[1].RevisionID.String() != plan.RevisionID {
+		t.Fatalf("очікували два незалежні рішення щодо точної ревізії: %+v", evidence)
+	}
+	if closed := doJSON(t, handler, http.MethodGet, path, nil, cookie, ""); closed.Code != http.StatusNotFound {
+		t.Fatalf("закритий запит не має показуватися як відкритий: %d", closed.Code)
 	}
 }
 

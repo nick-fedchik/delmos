@@ -66,6 +66,8 @@ func handleSubmitWorkProduct(authSvc *auth.Service, projects *project.Store) htt
 			writeJSONError(w, http.StatusUnprocessableEntity, "no_revision", "артефакт не має жодної ревізії")
 		case errors.Is(err, project.ErrAssigneeIsAuthor):
 			writeJSONError(w, http.StatusUnprocessableEntity, "assignee_is_author", err.Error())
+		case errors.Is(err, project.ErrReviewAssignmentsInvalid):
+			writeJSONError(w, http.StatusUnprocessableEntity, "invalid_assignments", err.Error())
 		case errors.As(err, &violation):
 			writeJSONError(w, http.StatusUnprocessableEntity, "rule_rejected", err.Error())
 		default:
@@ -116,6 +118,8 @@ func handleReviewDecision(authSvc *auth.Service, projects *project.Store, kind, 
 			writeJSONError(w, http.StatusUnprocessableEntity, "self_decision", err.Error())
 		case errors.Is(err, project.ErrStaleRevision):
 			writeJSONError(w, http.StatusConflict, "stale_revision", err.Error())
+		case errors.Is(err, project.ErrDecisionOperationConflict):
+			writeJSONError(w, http.StatusConflict, "operation_conflict", err.Error())
 		case errors.Is(err, project.ErrNotInReview):
 			writeJSONError(w, http.StatusUnprocessableEntity, "not_in_review", err.Error())
 		case errors.Is(err, project.ErrReviewRequestMissing):

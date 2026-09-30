@@ -1620,6 +1620,156 @@ a.btn-secondary:hover {
   padding: var(--spacing-lg);
 }
 
+.plan-overview-section {
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  overflow: visible;
+  background: transparent;
+}
+
+.plan-overview-section .section-box-header {
+  padding-inline: 0;
+  background: transparent;
+}
+
+.plan-overview-section .section-box-body {
+  padding-inline: 0;
+}
+
+.plan-overview {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr));
+  gap: var(--spacing-lg);
+}
+
+.plan-overview h3 {
+  margin: 0 0 var(--spacing-sm);
+  font-size: 0.9375rem;
+}
+
+.plan-overview p,
+.plan-overview ul {
+  margin-block: 0;
+}
+
+.plan-overview li {
+  overflow-wrap: anywhere;
+}
+
+.plan-readiness-list {
+  display: grid;
+  gap: var(--spacing-sm);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.plan-readiness-list li {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+}
+
+.plan-readiness-list .badge {
+  min-width: 6rem;
+  text-align: center;
+}
+
+.plan-review-actions {
+  flex-wrap: wrap;
+}
+
+.plan-configuration-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-lg);
+}
+
+.plan-configuration-form .section-box {
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  overflow: visible;
+  background: transparent;
+}
+
+.plan-configuration-form .section-box-header {
+  padding-inline: 0;
+  background: transparent;
+}
+
+.plan-configuration-form .section-box-body {
+  padding-inline: 0;
+}
+
+.plan-section-list {
+  display: grid;
+  gap: var(--spacing-md);
+}
+
+.plan-entry {
+  display: grid;
+  gap: var(--spacing-sm);
+  padding-bottom: var(--spacing-md);
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+
+.plan-entry-header {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--spacing-sm);
+}
+
+.plan-entry-header button {
+  margin-left: auto;
+}
+
+.plan-entry-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr));
+  gap: var(--spacing-md);
+}
+
+.plan-fieldset {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.plan-fieldset legend {
+  font-weight: 600;
+}
+
+.plan-reference-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-sm);
+}
+
+.repository-summary-line {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--spacing-sm);
+  margin: 0;
+  font-weight: 500;
+}
+
+.repository-empty-copy {
+  margin: 0 0 var(--spacing-md);
+}
+
+.repository-form {
+  max-width: 560px;
+}
+
+.repository-permission-note {
+  margin: var(--spacing-md) 0 0;
+}
+
 /* --- Довідка з підключення Git-сховища --- */
 .git-help {
   display: flex;

@@ -2,11 +2,34 @@ package project_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"os"
+	"reflect"
 	"testing"
 
 	"delmos/internal/project"
 )
+
+func TestDefaultGenericPlanManifestMatchesTemplate(t *testing.T) {
+	data, err := os.ReadFile("../../docs/templates/GENERIC-PROJECT-PLAN-TEMPLATE-v1.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var template struct {
+		Manifest project.GenericPlanManifest `json:"manifest"`
+	}
+	if err := json.Unmarshal(data, &template); err != nil {
+		t.Fatal(err)
+	}
+	actual := project.DefaultGenericPlanManifest()
+	if !reflect.DeepEqual(actual, template.Manifest) {
+		t.Fatalf("початковий план не збігається з шаблоном: отримано %+v, шаблон %+v", actual, template.Manifest)
+	}
+	if len(actual.Objectives) != 0 {
+		t.Fatal("новий план не повинен вигадувати цілі за проєктного менеджера")
+	}
+}
 
 func TestProjectCreatesGenericPlanTemplateAndRevision(t *testing.T) {
 	ctx := context.Background()
@@ -24,8 +47,8 @@ func TestProjectCreatesGenericPlanTemplateAndRevision(t *testing.T) {
 	if plan.TemplateKey != "generic-project-plan" || plan.TemplateVersion != 1 || plan.Revision.RevisionNumber != 1 {
 		t.Fatalf("очікувався generic-project-plan@1/r1, отримано %+v", plan)
 	}
-	if len(plan.Manifest.Objectives) != 1 || plan.Manifest.Objectives[0].Key != "OBJ-001" {
-		t.Fatalf("очікувався початковий objective шаблону, отримано %+v", plan.Manifest.Objectives)
+	if len(plan.Manifest.Objectives) != 0 {
+		t.Fatalf("новий план не повинен вигадувати ціль за ПМ, отримано %+v", plan.Manifest.Objectives)
 	}
 
 	plan.Manifest.Phases = []project.PlanPhase{{Key: "PH-001", Name: "Delivery", PlannedStart: "2026-10-01", PlannedFinish: "2026-10-31"}}
@@ -39,7 +62,7 @@ func TestProjectCreatesGenericPlanTemplateAndRevision(t *testing.T) {
 }
 
 func TestGenericPlanRejectsCyclicPhaseGraph(t *testing.T) {
-	manifest := project.DefaultGenericPlanManifest("Project")
+	manifest := project.DefaultGenericPlanManifest()
 	manifest.Phases = []project.PlanPhase{
 		{Key: "PH-001", Name: "First", PlannedStart: "2026-10-01", PlannedFinish: "2026-10-02", DependsOn: []string{"PH-002"}},
 		{Key: "PH-002", Name: "Second", PlannedStart: "2026-10-03", PlannedFinish: "2026-10-04", DependsOn: []string{"PH-001"}},

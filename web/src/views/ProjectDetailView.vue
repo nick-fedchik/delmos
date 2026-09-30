@@ -3,10 +3,9 @@ import { computed, onMounted, ref } from 'vue'
 import { RouterLink } from 'vue-router'
 
 import { api, ApiError } from '@/api/client'
-import GitSetupHelp from '@/components/GitSetupHelp.vue'
 import MarkdownEditor from '@/components/MarkdownEditor.vue'
 import PIcon from '@/components/PIcon.vue'
-import type { ProjectDetail, RepositoryBindingView, WorkProductSummary, WorkProductView } from '@/api/types'
+import type { ProjectDetail, WorkProductSummary, WorkProductView } from '@/api/types'
 import { CORE_WORK_PRODUCT_TYPES } from '@/api/types'
 import { useSessionStore } from '@/stores/session'
 
@@ -15,12 +14,10 @@ const session = useSessionStore()
 
 const project = ref<ProjectDetail | null>(null)
 const workProducts = ref<WorkProductSummary[]>([])
-const repositoryBinding = ref<RepositoryBindingView | null>(null)
 const loadError = ref('')
 const loading = ref(true)
 
 const canCreateWp = computed(() => project.value?.permissions?.includes('wp.create') ?? session.hasPermission('wp.create'))
-const canManageRepo = computed(() => project.value?.permissions?.includes('repository.manage') ?? session.hasPermission('repository.manage'))
 
 const wpCode = ref('')
 const wpType = ref<string>(CORE_WORK_PRODUCT_TYPES[0])
@@ -31,21 +28,12 @@ const creatingWp = ref(false)
 const wpError = ref('')
 const isCreateWpOpen = ref(false)
 
-const remoteUrl = ref('')
-const bindingError = ref('')
-const binding = ref(false)
-
 async function load(): Promise<void> {
   loading.value = true
   loadError.value = ''
   try {
     project.value = await api.get<ProjectDetail>(`/projects/${props.projectId}`)
     workProducts.value = await api.get<WorkProductSummary[]>(`/projects/${props.projectId}/work-products`)
-    try {
-      repositoryBinding.value = await api.get<RepositoryBindingView>(`/projects/${props.projectId}/repository`)
-    } catch {
-      repositoryBinding.value = null // сховище ще не прив'язано — не помилка сторінки
-    }
   } catch (err) {
     loadError.value = err instanceof ApiError ? err.message : 'Не вдалося прочитати проєкт'
   } finally {
@@ -82,21 +70,6 @@ async function handleCreateWorkProduct(): Promise<void> {
     wpError.value = err instanceof ApiError ? err.message : 'Не вдалося створити work product'
   } finally {
     creatingWp.value = false
-  }
-}
-
-async function handleBindRepository(): Promise<void> {
-  bindingError.value = ''
-  binding.value = true
-  try {
-    repositoryBinding.value = await api.post<RepositoryBindingView>(`/projects/${props.projectId}/repository`, {
-      remote_url: remoteUrl.value,
-    })
-    remoteUrl.value = ''
-  } catch (err) {
-    bindingError.value = err instanceof ApiError ? err.message : 'Не вдалося прив\u2019язати сховище'
-  } finally {
-    binding.value = false
   }
 }
 
@@ -177,68 +150,15 @@ onMounted(load)
         </div>
       </div>
 
-      <!-- Секція Git-сховища (RepositoryProvider) -->
       <div class="section-box">
         <div class="section-box-header">
           <div>
-            <h2 class="section-box-title">Підключення Git-сховища — необов'язкове</h2>
-            <p class="section-box-desc">
-              Джерело істини для артефактів — база даних DELMOS. Git потрібен лише для
-              експорту ревізій у форматі Docs-as-Code
-            </p>
+            <h2 class="section-box-title">Сховище</h2>
+            <p class="section-box-desc">Підключення Git і експорт ревізій Docs-as-Code</p>
           </div>
-        </div>
-        <div class="section-box-body">
-          <template v-if="repositoryBinding">
-            <div style="display: flex; align-items: center; justify-content: space-between; gap: 1rem">
-              <div>
-                <p style="margin: 0 0 0.25rem; font-weight: 500">
-                  <span :class="['badge', repositoryBinding.status === 'active' ? 'badge-success' : 'badge-danger']" style="margin-right: 0.5rem">
-                    {{ repositoryBinding.status }}
-                  </span>
-                  <code>{{ repositoryBinding.remote_url }}</code>
-                  <span class="muted" style="margin-left: 0.5rem">(гілка: {{ repositoryBinding.default_branch }})</span>
-                </p>
-                <p v-if="repositoryBinding.last_error" class="alert-error" style="margin: 0.5rem 0 0">{{ repositoryBinding.last_error }}</p>
-              </div>
-            </div>
-
-            <GitSetupHelp
-              :remote-url="repositoryBinding.remote_url"
-              :default-branch="repositoryBinding.default_branch"
-              :project-code="project.code"
-            />
-          </template>
-
-          <template v-else>
-            <p class="muted" style="margin: 0 0 1rem">
-              Проєкт не прив'язаний до Git-сховища — це нічого не блокує. План, вимоги та решта
-              артефактів уже зберігаються в базі даних DELMOS із незмінною історією ревізій.
-              Прив'язка потрібна лише тоді, коли ви хочете експортувати артефакти в Git.
-            </p>
-
-            <template v-if="canManageRepo">
-              <GitSetupHelp :remote-url="null" default-branch="main" :project-code="project.code" />
-
-              <form style="max-width: 560px" @submit.prevent="handleBindRepository">
-                <p v-if="bindingError" class="alert-error" role="alert">{{ bindingError }}</p>
-                <div class="field">
-                  <label for="remote-url">URL або локальний шлях bare-сховища</label>
-                  <input
-                    id="remote-url"
-                    v-model="remoteUrl"
-                    type="text"
-                    placeholder="/var/lib/delmos/repos/inv-001.git або https://git.company.com/repo.git"
-                    required
-                  />
-                  <span class="field-hint muted">Локальний Unix bare репозиторій або HTTPS Git endpoint</span>
-                </div>
-                <button class="btn-secondary" type="submit" :disabled="binding">
-                  {{ binding ? 'Прив’язка...' : 'Прив’язати сховище' }}
-                </button>
-              </form>
-            </template>
-          </template>
+          <RouterLink :to="{ name: 'project-repository', params: { projectId: project.id } }" class="btn-secondary btn-sm">
+            Відкрити сховище
+          </RouterLink>
         </div>
       </div>
 

@@ -171,6 +171,8 @@ func TestReviewerCannotApproveWithoutApproverAssignment(t *testing.T) {
 func TestSinglePersonWithBothAssignmentsMayDecideTwice(t *testing.T) {
 	f := newSubmitFixture(t)
 	dual := f.user(t, "dual")
+	f.grantReviewRole(t, dual, "project.reviewer")
+	f.grantReviewRole(t, dual, "project.approver")
 
 	req, err := f.projects.SubmitWorkProduct(context.Background(),
 		f.actor, f.projectID, f.workProductID, []project.ReviewAssignment{
@@ -255,6 +257,55 @@ func TestDecisionIsIdempotentByOperationKey(t *testing.T) {
 	}
 	if decisions != 1 {
 		t.Errorf("рішень = %d, очікувано 1 — другий підпис не мав з'явитися", decisions)
+	}
+}
+
+func TestDecisionOperationKeyCannotReplayAnotherActorOrProject(t *testing.T) {
+	f := newSubmitFixture(t)
+	f.submitted(t)
+	const opKey = "shared-operation-key"
+	first, err := f.decide(t, f.reviewer, project.DecisionReview, "", opKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, attempt := range []struct {
+		actorID   uuid.UUID
+		projectID uuid.UUID
+		kind      string
+	}{
+		{actorID: f.approver2, projectID: f.projectID, kind: project.DecisionApproval},
+		{actorID: f.reviewer, projectID: uuid.New(), kind: project.DecisionReview},
+	} {
+		got, err := f.projects.RecordDecision(context.Background(), attempt.actorID, attempt.projectID,
+			f.workProductID, attempt.kind, "", opKey)
+		if !errors.Is(err, project.ErrDecisionOperationConflict) || got.ID == first.ID {
+			t.Fatalf("повтор чужого ключа не повинен розкривати рішення: got=%+v err=%v", got, err)
+		}
+	}
+}
+
+func TestDecisionOperationKeyCannotReplayStaleRevision(t *testing.T) {
+	f := newSubmitFixture(t)
+	f.submitted(t)
+	const opKey = "revision-operation-key"
+	if _, err := f.decide(t, f.reviewer, project.DecisionReview, "", opKey); err != nil {
+		t.Fatal(err)
+	}
+	f.addRevision(t, f.workProductID, "нова ревізія", f.actor)
+	if _, err := f.decide(t, f.reviewer, project.DecisionReview, "", opKey); !errors.Is(err, project.ErrDecisionOperationConflict) {
+		t.Fatalf("ключ попередньої ревізії не повинен повертати старе рішення: %v", err)
+	}
+}
+
+func TestDecisionOperationKeyCannotReplayDifferentReason(t *testing.T) {
+	f := newSubmitFixture(t)
+	f.submitted(t)
+	const opKey = "reason-operation-key"
+	if _, err := f.decide(t, f.reviewer, project.DecisionRequestChanges, "Потрібні критерії", opKey); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.decide(t, f.reviewer, project.DecisionRequestChanges, "Потрібен інший доказ", opKey); !errors.Is(err, project.ErrDecisionOperationConflict) {
+		t.Fatalf("ключ рішення з іншою причиною має конфліктувати: %v", err)
 	}
 }
 

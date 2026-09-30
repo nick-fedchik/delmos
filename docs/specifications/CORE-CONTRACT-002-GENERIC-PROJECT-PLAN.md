@@ -33,36 +33,30 @@ Generic Plan не нав'язує методологію, галузевий с�
 
 Базова версія плану є `revision_number` його Work Product revision: натуральне
 число $n \geq 1$. Початкова ревізія має номер `1`, кожна наступна — рівно
-`n + 1`; номери не перевикористовуються. `manifest_version` у прикладі нижче
-версіонує формат маніфесту, а не конфігурацію проєкту. Аналогічно,
-`profile_version` та `plan_schema_version` позначають сумісність профілю або
-схеми. Модулі можуть визначати власні версії лише у своєму просторі
+`n + 1`; номери не перевикористовуються. Формат чинного маніфесту визначає
+`template_version` у відповіді API (`generic-project-plan@1`), а не поле всередині
+маніфесту. Нову версію формату вводять лише узгоджено в шаблоні, сервері та API.
+Модулі можуть визначати власні версії лише у своєму просторі
 `extensions.<module_id>`. `row_version` Work Product використовується лише для
 оптимістичного блокування конкурентних змін і не є версією плану.
 
 ```json
 {
-  "manifest_version": "1.0.0",
-  "purpose": {
-    "name": "Inverter Controller",
-    "objective": "Develop and validate the controller",
-    "success_criteria": ["Acceptance milestone passed"]
-  },
-  "scope": {
-    "in_scope": ["System requirements", "Firmware"],
-    "out_of_scope": ["Serial production"]
-  },
-  "roles": [
-    {
-      "id": "ROLE-PM",
-      "name": "Project manager",
-      "responsibilities": ["plan.manage"],
-      "accountable_for": ["MS-RELEASE"]
-    }
+  "objectives": [
+    { "key": "OBJ-001", "statement": "Develop and validate the controller", "success_criteria": ["Acceptance milestone passed"] }
+  ],
+  "scope_items": [
+    { "key": "SCOPE-001", "kind": "in_scope", "statement": "System requirements and firmware", "rationale": "Required for acceptance" },
+    { "key": "SCOPE-002", "kind": "out_of_scope", "statement": "Serial production", "rationale": "Separate programme" }
+  ],
+  "assumptions": [],
+  "constraints": [],
+  "responsibility_assignments": [
+    { "key": "RESP-001", "role_key": "ROLE-PM", "subject": "Project manager", "responsibility": "Coordinate delivery" }
   ],
   "deliverables": [
     {
-      "id": "DEL-ARCH",
+      "key": "DEL-ARCH",
       "name": "Architecture",
       "work_product_id": "1da3c104-df6a-4ab2-a4ec-388c2fd9a31d",
       "required_status": "approved"
@@ -70,7 +64,7 @@ Generic Plan не нав'язує методологію, галузевий с�
   ],
   "phases": [
     {
-      "id": "PH-DESIGN",
+      "key": "PH-DESIGN",
       "name": "Design",
       "planned_start": "2026-10-01",
       "planned_finish": "2026-11-30",
@@ -79,17 +73,16 @@ Generic Plan не нав'язує методологію, галузевий с�
   ],
   "milestones": [
     {
-      "id": "MS-RELEASE",
+      "key": "MS-RELEASE",
       "name": "Release decision",
-      "phase_id": "PH-DESIGN",
+      "phase_key": "PH-DESIGN",
       "target_date": "2026-11-30",
-      "deliverable_ids": ["DEL-ARCH"],
-      "acceptance": {
-        "all_deliverables_match_required_status": true,
-        "required_gate": true
-      }
+      "deliverable_keys": ["DEL-ARCH"],
+      "acceptance_rule_keys": []
     }
   ],
+  "acceptance_rules": [],
+  "governance": { "change_control_required": true },
   "extensions": {}
 }
 ```
@@ -102,8 +95,8 @@ Generic Plan не нав'язує методологію, галузевий с�
 
 | Секція | Системна дія |
 | --- | --- |
-| `purpose` і `scope` | Класифікують конфігурацію проєкту; не створюють workflow. |
-| `roles` | Визначають відповідальність у плані; не надають RBAC-дозволів. Права надаються тільки через `RoleBinding`. |
+| `objectives` і `scope_items` | Визначають цілі, критерії успіху та межі проєкту; не створюють workflow. |
+| `responsibility_assignments` | Визначають відповідальність у плані; не надають RBAC-дозволів. Права надаються тільки через `RoleBinding`. |
 | `deliverables` | Явно пов'язують результат плану з існуючим Work Product та його обов'язковим станом. |
 | `phases` | Задають упорядкований граф виконання; фаза не може бути відкрита, доки її залежності не завершені. |
 | `milestones` | Визначають контрольну точку, її результати й мінімальні умови приймання. |
@@ -118,8 +111,9 @@ Generic Plan не нав'язує методологію, галузевий с�
 
 Перед створенням ревізії плану система зобов'язана перевірити:
 
-1. `manifest_version` підтримується ядром.
-2. Усі ідентифікатори `roles`, `deliverables`, `phases` і `milestones` унікальні
+1. `template_version` підтримується ядром; його немає в JSON маніфесту.
+2. Ключі кожної секції `objectives`, `scope_items`, `assumptions`, `constraints`,
+   `responsibility_assignments`, `deliverables`, `phases`, `milestones` та `acceptance_rules` унікальні
    в межах маніфесту та відповідають формату стабільного ключа.
 3. Кожен `work_product_id` існує в тому самому проєкті; `PLAN-001` не може бути
    deliverable самого себе.
@@ -128,7 +122,7 @@ Generic Plan не нав'язує методологію, галузевий с�
    у межах призначеної фази.
 6. `depends_on` посилається лише на іншу фазу, не містить дублікатів і формує
    ациклічний граф.
-7. Кожен milestone належить рівно одній фазі; усі його `deliverable_ids`
+7. Кожен milestone належить рівно одній фазі; усі його `deliverable_keys`
    існують; порожній список допустимий лише якщо він не має вимоги результатів.
 8. Ключ у `extensions` належить активному модулю, доступному системній політиці;
    його значення проходить JSON Schema та додаткову перевірку провайдера.

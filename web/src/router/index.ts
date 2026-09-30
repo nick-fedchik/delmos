@@ -7,6 +7,7 @@ const router = createRouter({
   routes: [
     { path: '/login', name: 'login', component: () => import('@/views/LoginView.vue'), meta: { public: true } },
     { path: '/', name: 'projects', component: () => import('@/views/ProjectListView.vue') },
+    { path: '/admin/review-roles', name: 'admin-review-roles', component: () => import('@/views/ProjectReviewRolesView.vue') },
     {
       path: '/projects/:projectId',
       name: 'project',
@@ -17,6 +18,18 @@ const router = createRouter({
       path: '/projects/:projectId/plan',
       name: 'project-plan',
       component: () => import('@/views/ProjectPlanView.vue'),
+      props: true,
+    },
+    {
+      path: '/projects/:projectId/plan/configuration',
+      name: 'project-plan-configuration',
+      component: () => import('@/views/ProjectPlanConfigurationView.vue'),
+      props: true,
+    },
+    {
+      path: '/projects/:projectId/repository',
+      name: 'project-repository',
+      component: () => import('@/views/ProjectRepositoryView.vue'),
       props: true,
     },
     {

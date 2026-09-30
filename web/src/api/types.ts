@@ -43,16 +43,83 @@ export interface ProjectDetail {
   permissions?: string[]
 }
 
+export interface ProjectObjective {
+  key: string
+  statement: string
+  success_criteria: string[]
+}
+
+export interface ScopeItem {
+  key: string
+  kind: 'in_scope' | 'out_of_scope'
+  statement: string
+  rationale: string
+}
+
+export interface PlanAssumption {
+  key: string
+  statement: string
+  owner_reference: string
+  validation_date: string
+  status: string
+}
+
+export interface PlanConstraint {
+  key: string
+  kind: string
+  statement: string
+  source_ref: string
+  enforcement: string
+}
+
+export interface ResponsibilityAssignment {
+  key: string
+  role_key: string
+  subject: string
+  responsibility: string
+}
+
+export interface PlanDeliverable {
+  key: string
+  name: string
+  work_product_id: string
+  required_status: string
+}
+
+export interface PlanPhaseDefinition {
+  key: string
+  name: string
+  planned_start: string
+  planned_finish: string
+  depends_on: string[]
+}
+
+export interface PlanMilestoneDefinition {
+  key: string
+  name: string
+  phase_key: string
+  target_date: string
+  deliverable_keys: string[]
+  acceptance_rule_keys: string[]
+}
+
+export interface PlanAcceptanceRule {
+  key: string
+  predicate_key: string
+  parameters: Record<string, unknown>
+  enforcement: string
+}
+
 export interface GenericPlanManifest {
-  objectives: unknown[]
-  scope_items: unknown[]
-  assumptions: unknown[]
-  constraints: unknown[]
-  responsibility_assignments: unknown[]
-  deliverables: unknown[]
-  phases: unknown[]
-  milestones: unknown[]
-  acceptance_rules: unknown[]
+  objectives: ProjectObjective[]
+  scope_items: ScopeItem[]
+  assumptions: PlanAssumption[]
+  constraints: PlanConstraint[]
+  responsibility_assignments: ResponsibilityAssignment[]
+  deliverables: PlanDeliverable[]
+  phases: PlanPhaseDefinition[]
+  milestones: PlanMilestoneDefinition[]
+  acceptance_rules: PlanAcceptanceRule[]
   governance: { change_control_required: boolean }
   extensions: Record<string, unknown>
 }
@@ -100,6 +167,52 @@ export interface PlanDetailView {
   config_generation?: number
   phases?: ProjectPhase[]
   milestones?: ProjectMilestone[]
+}
+
+export interface PlanReviewCandidate {
+  id: string
+  login: string
+  display_name: string
+  can_review: boolean
+  can_approve: boolean
+}
+
+export interface PlanReviewStatus {
+  revision_id: string
+  participants: {
+    display_name: string
+    role: 'reviewer' | 'approver'
+    completed: boolean
+    assigned_to_me: boolean
+  }[]
+  has_positive_review: boolean
+}
+
+export interface PlanApprovalEvidence {
+  revision_id: string
+  decision_kind: 'review' | 'approval'
+  display_name: string
+  decided_at: string
+}
+
+export interface ReviewRoleProject {
+  id: string
+  code: string
+  name: string
+}
+
+export interface ReviewRoleUser {
+  id: string
+  login: string
+  display_name: string
+}
+
+export interface ProjectReviewRoleBinding {
+  id: string
+  user_id: string
+  login: string
+  display_name: string
+  role_key: 'project.reviewer' | 'project.approver'
 }
 
 export interface Stakeholder {

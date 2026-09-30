@@ -9,11 +9,13 @@ import { RouterLink } from 'vue-router'
 import PIcon from '@/components/PIcon.vue'
 import type { IconName } from '@/components/PIcon.vue'
 import { useProjectContext } from '@/composables/useProjectContext'
+import { useSessionStore } from '@/stores/session'
 
 defineProps<{ expanded: boolean; overlay: boolean }>()
 const emit = defineEmits<{ (event: 'toggle'): void; (event: 'navigate'): void }>()
 
 const { projectId, project } = useProjectContext()
+const session = useSessionStore()
 
 interface NavItem {
   name: string
@@ -21,13 +23,15 @@ interface NavItem {
   icon: IconName
 }
 
-const systemItems: NavItem[] = [
+const systemItems = computed<NavItem[]>(() => [
   { name: 'projects', label: 'Усі проєкти', icon: 'project' },
-]
+  ...(session.hasPermission('access.grant') ? [{ name: 'admin-review-roles', label: 'Ролі погодження', icon: 'users' as IconName }] : []),
+])
 
 const projectItems: NavItem[] = [
   { name: 'project', label: 'Огляд проєкту', icon: 'overview' },
   { name: 'project-plan', label: 'План PLAN-001', icon: 'planning' },
+  { name: 'project-repository', label: 'Сховище', icon: 'project' },
   { name: 'project-stakeholders', label: 'Стейкхолдери (RACI)', icon: 'users' },
   { name: 'project-risks', label: 'Реєстр ризиків', icon: 'warning' },
 ]

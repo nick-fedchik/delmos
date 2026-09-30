@@ -37,6 +37,8 @@ func newPlanFixture(t *testing.T) *planFixture {
 		t.Fatalf("створення проєкту з планом: %v", err)
 	}
 	f.projectID = detail.Project.ID
+	f.grantReviewRole(t, f.reviewer, "project.reviewer")
+	f.grantReviewRole(t, f.approver, "project.approver")
 
 	if err := f.pool.QueryRow(context.Background(),
 		`SELECT id, row_version FROM core.work_products
@@ -171,7 +173,7 @@ func TestReviseApprovedPlanReturnsDraftAndPublishesRevision(t *testing.T) {
 	ctx := context.Background()
 	previousRevision := f.latestPlanRevision(t)
 	revised, err := f.projects.RevisePlan(ctx, f.actor, f.projectID, f.planRowVersion,
-		"оновлений план", project.DefaultGenericPlanManifest("Шлюз плану"))
+		"оновлений план", project.DefaultGenericPlanManifest())
 	if err != nil {
 		t.Fatalf("нова ревізія затвердженого плану: %v", err)
 	}
@@ -206,7 +208,7 @@ func TestRevisePlanSupersedesOpenReviewRequest(t *testing.T) {
 	}
 	f.refreshPlanRowVersion(t)
 	if _, err := f.projects.RevisePlan(ctx, f.actor, f.projectID, f.planRowVersion,
-		"наступна версія", project.DefaultGenericPlanManifest("Шлюз плану")); err != nil {
+		"наступна версія", project.DefaultGenericPlanManifest()); err != nil {
 		t.Fatal(err)
 	}
 	var status string
@@ -308,7 +310,7 @@ func (f *planFixture) reviseManifest(t *testing.T, label string, manifest projec
 // planWithPhase будує мінімальний валідний маніфест із однією фазою або
 // зовсім без фаз.
 func planWithPhase(name, phaseKey string) project.GenericPlanManifest {
-	manifest := project.DefaultGenericPlanManifest(name)
+	manifest := project.DefaultGenericPlanManifest()
 	if phaseKey != "" {
 		manifest.Phases = []project.PlanPhase{{
 			Key: phaseKey, Name: phaseKey,

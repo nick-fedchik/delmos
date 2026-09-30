@@ -186,11 +186,9 @@ func (s *Store) ListEntityDefinitions(ctx context.Context) ([]EntityDefinition, 
 	return definitions, rows.Err()
 }
 
-func DefaultGenericPlanManifest(projectName string) GenericPlanManifest {
+func DefaultGenericPlanManifest() GenericPlanManifest {
 	return GenericPlanManifest{
-		Objectives: []ProjectObjective{{
-			Key: "OBJ-001", Statement: "Deliver " + projectName,
-		}},
+		Objectives: []ProjectObjective{},
 		ScopeItems: []ScopeItem{}, Assumptions: []Assumption{}, Constraints: []Constraint{},
 		ResponsibilityAssignments: []ResponsibilityAssignment{}, Deliverables: []Deliverable{},
 		Phases: []PlanPhase{}, Milestones: []PlanMilestone{}, AcceptanceRules: []AcceptanceRule{},

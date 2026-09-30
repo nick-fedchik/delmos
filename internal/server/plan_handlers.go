@@ -13,6 +13,8 @@ import (
 	"delmos/internal/project"
 )
 
+const maxPlanRevisionBodyBytes = 1 << 20
+
 type planDetailView struct {
 	WorkProductID           string                      `json:"work_product_id"`
 	Code                    string                      `json:"code"`
@@ -95,6 +97,93 @@ func handleGetPlan(authSvc *auth.Service, projects *project.Store) http.HandlerF
 	}
 }
 
+func handleListPlanReviewCandidates(authSvc *auth.Service, projects *project.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		_, projectID, ok := projectScopePermission(w, r, authSvc, "wp.submit")
+		if !ok {
+			return
+		}
+		plan, err := projects.GetPlan(r.Context(), projectID)
+		if errors.Is(err, project.ErrPlanNotFound) {
+			writeJSONError(w, http.StatusNotFound, "not_found", "план проєкту не знайдено")
+			return
+		}
+		if err != nil {
+			writeJSONError(w, http.StatusInternalServerError, "internal_error", "не вдалося прочитати план проєкту")
+			return
+		}
+		candidates, err := authSvc.ListProjectReviewCandidates(r.Context(), projectID, plan.Revision.CreatedBy)
+		if err != nil {
+			writeJSONError(w, http.StatusInternalServerError, "internal_error", "не вдалося прочитати учасників погодження")
+			return
+		}
+		writeJSON(w, http.StatusOK, candidates)
+	}
+}
+
+func handleGetPlanReview(authSvc *auth.Service, projects *project.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		actorID, projectID, ok := projectScopePermission(w, r, authSvc, "project.read")
+		if !ok {
+			return
+		}
+		plan, err := projects.GetPlan(r.Context(), projectID)
+		if errors.Is(err, project.ErrPlanNotFound) {
+			writeJSONError(w, http.StatusNotFound, "not_found", "план проєкту не знайдено")
+			return
+		}
+		if err != nil {
+			writeJSONError(w, http.StatusInternalServerError, "internal_error", "не вдалося прочитати план проєкту")
+			return
+		}
+		if plan.WorkProduct.Status != "in_review" {
+			writeJSONError(w, http.StatusNotFound, "not_found", "відкритого погодження немає")
+			return
+		}
+		review, err := projects.GetOpenPlanReview(r.Context(), projectID, plan.WorkProduct.ID, plan.Revision.ID)
+		if errors.Is(err, project.ErrReviewRequestMissing) {
+			writeJSONError(w, http.StatusNotFound, "not_found", "відкритого погодження немає")
+			return
+		}
+		if err != nil {
+			writeJSONError(w, http.StatusInternalServerError, "internal_error", "не вдалося прочитати погодження плану")
+			return
+		}
+		for index := range review.Participants {
+			review.Participants[index].AssignedToMe = review.Participants[index].UserID == actorID
+		}
+		writeJSON(w, http.StatusOK, review)
+	}
+}
+
+func handleGetPlanApprovalEvidence(authSvc *auth.Service, projects *project.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		_, projectID, ok := projectScopePermission(w, r, authSvc, "project.read")
+		if !ok {
+			return
+		}
+		plan, err := projects.GetPlan(r.Context(), projectID)
+		if errors.Is(err, project.ErrPlanNotFound) {
+			writeJSONError(w, http.StatusNotFound, "not_found", "план проєкту не знайдено")
+			return
+		}
+		if err != nil {
+			writeJSONError(w, http.StatusInternalServerError, "internal_error", "не вдалося прочитати план проєкту")
+			return
+		}
+		if plan.WorkProduct.Status != "approved" {
+			writeJSONError(w, http.StatusNotFound, "not_found", "погоджену ревізію не знайдено")
+			return
+		}
+		evidence, err := projects.ListCurrentPlanApprovalEvidence(r.Context(), projectID, plan.WorkProduct.ID, plan.Revision.ID)
+		if err != nil {
+			writeJSONError(w, http.StatusInternalServerError, "internal_error", "не вдалося прочитати підтвердження плану")
+			return
+		}
+		writeJSON(w, http.StatusOK, evidence)
+	}
+}
+
 func handleListEntityDefinitions(projects *project.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if _, ok := authContextFrom(r.Context()); !ok {
@@ -121,7 +210,7 @@ func handleRevisePlan(authSvc *auth.Service, projects *project.Store) http.Handl
 			return
 		}
 		var req revisePlanRequest
-		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxLoginBodyBytes)).Decode(&req); err != nil {
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxPlanRevisionBodyBytes)).Decode(&req); err != nil {
 			writeJSONError(w, http.StatusBadRequest, "invalid_body", "некоректне тіло запиту")
 			return
 		}

@@ -25,6 +25,8 @@ func newSubmitFixture(t *testing.T) *submitFixture {
 	f := &submitFixture{phaseFixture: base}
 	f.reviewer = base.user(t, "reviewer")
 	f.approver2 = base.user(t, "approver")
+	f.grantReviewRole(t, f.reviewer, "project.reviewer")
+	f.grantReviewRole(t, f.approver2, "project.approver")
 	f.workProductID = f.draftWithRevision(t, "REQ-1", "перший текст")
 	return f
 }
@@ -165,6 +167,46 @@ func TestSubmitRejectsAuthorAsAssignee(t *testing.T) {
 				t.Errorf("статус артефакту = %q, очікувано draft — транзакція мала відкотитися", got)
 			}
 		})
+	}
+}
+
+func TestSubmitRejectsUnqualifiedAndIncompleteAssignments(t *testing.T) {
+	f := newSubmitFixture(t)
+	unqualified := f.user(t, "unqualified")
+	for _, assignments := range [][]project.ReviewAssignment{
+		{{UserID: f.reviewer, Role: "reviewer"}},
+		{{UserID: unqualified, Role: "reviewer"}, {UserID: f.approver2, Role: "approver"}},
+	} {
+		if _, err := f.projects.SubmitWorkProduct(context.Background(), f.actor, f.projectID, f.workProductID, assignments); err == nil {
+			t.Fatalf("подання без обох чинних проєктних ролей має бути відхилено: %+v", assignments)
+		}
+		if status := f.wpStatus(t, f.workProductID); status != "draft" {
+			t.Fatalf("відхилене подання змінило статус на %s", status)
+		}
+	}
+}
+
+func TestSubmitRejectsRevokedAssigneeBeforeCreatingRequest(t *testing.T) {
+	f := newSubmitFixture(t)
+	if _, err := f.pool.Exec(context.Background(),
+		`UPDATE core.role_bindings SET revoked_at = now()
+		 WHERE user_id = $1 AND scope_type = 'project' AND scope_id = $2 AND role_key = 'project.approver'`,
+		f.approver2, f.projectID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.projects.SubmitWorkProduct(context.Background(), f.actor, f.projectID, f.workProductID, f.defaultAssignments()); !errors.Is(err, project.ErrReviewAssignmentsInvalid) {
+		t.Fatalf("відкликана роль не повинна бути призначеною: %v", err)
+	}
+	if status := f.wpStatus(t, f.workProductID); status != "draft" {
+		t.Fatalf("після відмови артефакт не повинен перейти в review: %s", status)
+	}
+	var requests int
+	if err := f.pool.QueryRow(context.Background(),
+		`SELECT count(*) FROM core.review_requests WHERE work_product_id = $1`, f.workProductID).Scan(&requests); err != nil {
+		t.Fatal(err)
+	}
+	if requests != 0 {
+		t.Fatalf("після відмови не має бути відкритого запиту: %d", requests)
 	}
 }
 

@@ -55,7 +55,7 @@ func NewDatabase(t *testing.T) string {
 		}
 		defer func() { _ = conn.Close(cleanupCtx) }()
 
-		drop := fmt.Sprintf("DROP DATABASE IF EXISTS %s WITH (FORCE)", pgx.Identifier{name}.Sanitize())
+		drop := fmt.Sprintf("DROP DATABASE IF EXISTS %s", pgx.Identifier{name}.Sanitize())
 		if _, err := conn.Exec(cleanupCtx, drop); err != nil {
 			t.Errorf("видалення тимчасової бази %s: %v", name, err)
 		}

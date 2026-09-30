@@ -125,7 +125,7 @@ func (s *Store) CreateWithPlan(ctx context.Context, actorID uuid.UUID, code, nam
 		return ProjectDetail{}, fmt.Errorf("створення PLAN-001: %w", err)
 	}
 
-	manifest := DefaultGenericPlanManifest(name)
+	manifest := DefaultGenericPlanManifest()
 	metadata := map[string]any{
 		"plan_schema_version": "1.0.0",
 		"template_key":        genericPlanTemplateKey,
